@@ -298,7 +298,7 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
         <select id="sModel"></select>
         <button class="btn" id="loadModels" style="flex:0 0 auto">목록 불러오기</button>
       </div>
-      <div class="hint">키를 입력한 뒤 목록 불러오기를 누르면 쓸 수 있는 모델이 나와요.</div>
+      <div class="hint" id="modelHint">키를 입력한 뒤 목록 불러오기를 누르면 쓸 수 있는 모델이 나와요.</div>
     </div>
     <div class="field">
       <label>도구</label>
@@ -453,7 +453,11 @@ const savePrompts = () => { promptsStore.updated = Date.now(); LS.set('prompts',
 const findPrompt = id => promptsStore.items.find(p => p.id === id);
 
 function toast(t){
-  const el = $('toast'); el.textContent = t; el.classList.add('show');
+  const el = $('toast'); el.textContent = t;
+  // 설정 창 같은 대화상자가 열려 있으면 그 위에 보이도록 옮김
+  const top = [...document.querySelectorAll('dialog[open]')].pop() || document.body;
+  if (el.parentNode !== top) top.appendChild(el);
+  el.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2600);
 }
 
@@ -1154,19 +1158,33 @@ async function send(){
 }
 
 async function loadModels(){
-  const key = $('sKey').value.trim();
-  if (!key){ toast('API 키를 먼저 입력해 주세요'); return }
+  const key = $('sKey').value.replace(/\s+/g, '');
+  $('sKey').value = key;
+  const hint = $('modelHint');
+  if (!key){ hint.textContent = 'API 키를 먼저 입력해 주세요.'; toast('API 키를 먼저 입력해 주세요'); return }
+  hint.textContent = '모델 목록을 불러오는 중이에요…';
   try{
     const r = await fetch('https://api.openai.com/v1/models', { headers:{ Authorization:'Bearer ' + key } });
-    if (!r.ok) throw new Error('키를 확인해 주세요 (' + r.status + ')');
+    if (!r.ok){
+      const j = await r.json().catch(() => ({}));
+      const why = r.status === 401 ? 'API 키가 맞지 않아요. 키 전체가 빠짐없이 들어갔는지 확인해 주세요.'
+        : r.status === 403 ? '이 키에 모델 목록을 볼 권한이 없어요. 키를 만들 때 권한을 All로 해 주세요.'
+        : r.status === 429 ? '요청이 너무 많거나 충전금이 부족해요.'
+        : (j.error?.message || '');
+      throw new Error(`(${r.status}) ${why}`);
+    }
     const j = await r.json();
     const skip = /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|davinci|babbage|search|computer-use/i;
     const ids = j.data.map(m => m.id).filter(id => /^(gpt|o\d|chatgpt)/i.test(id) && !skip.test(id)).sort().reverse();
     settings.models = ids; fillModels(ids, $('sModel').value || settings.model);
     const imgIds = j.data.map(m => m.id).filter(id => /^(gpt-image|dall-e-3)/i.test(id)).sort().reverse();
     settings.imageModels = imgIds; fillImageModels(imgIds, $('sImgModel').value || settings.imageModel);
+    hint.textContent = ids.length ? `${ids.length}개 모델을 불러왔어요. 위에서 하나 골라 주세요.` : '쓸 수 있는 채팅 모델이 없어요.';
     toast(ids.length + '개 모델을 불러왔어요');
-  }catch(e){ toast(e.message) }
+  }catch(e){
+    const msg = e.name === 'TypeError' ? '인터넷 연결을 확인해 주세요.' : e.message;
+    hint.textContent = '불러오지 못했어요 ' + msg; toast('불러오지 못했어요 ' + msg);
+  }
 }
 function fillModels(ids, sel){
   const s = $('sModel'); s.innerHTML = '';
