@@ -63,6 +63,20 @@ aside{
 .item.active{background:var(--surface);font-weight:500}
 .item .del{opacity:0;border:0;background:none;color:var(--muted);padding:0 4px;font-size:16px;line-height:1}
 .item:hover .del,.item.active .del{opacity:1}
+.wallet{
+  display:block;width:calc(100% - 24px);margin:8px 12px 10px;padding:10px 12px;text-align:left;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface)
+}
+.wallet:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.w-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--muted)}
+.w-top b{font-size:16px;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.w-bar{height:4px;border-radius:2px;background:var(--line);margin-top:8px;overflow:hidden}
+.w-bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:2px;transition:width .3s}
+.w-sub{font-size:12px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+.wallet.low .w-top b{color:var(--warn)} .wallet.low .w-bar i{background:var(--warn)}
+.wallet.empty .w-top b{color:var(--accent);font-size:13.5px}
+.msg-tools .cost{font-size:12px;color:var(--muted);margin-left:12px;font-variant-numeric:tabular-nums}
+.plabel{display:flex !important;flex-direction:column;gap:4px;font-size:12px !important;font-weight:400 !important;color:var(--muted);margin:0 !important}
 .side-foot{border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:4px;align-items:center}
 .sync{
   flex:1;display:flex;align-items:center;gap:8px;border:0;background:none;padding:6px 4px;
@@ -235,6 +249,11 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
       <button class="btn-new" id="newBtn">새 대화</button>
     </div>
     <div id="list"></div>
+    <button class="wallet empty" id="wallet" aria-label="남은 충전금">
+      <div class="w-top"><span>남은 충전금</span><b id="wBal">입력하기</b></div>
+      <div class="w-bar"><i id="wFill"></i></div>
+      <div class="w-sub" id="wSub">이번 달 약 $0.00 사용</div>
+    </button>
     <div class="side-foot">
       <button class="sync" id="syncBtn"><span class="dot" id="syncDot"></span><span id="syncText">동기화 꺼짐</span></button>
       <button class="icon-btn" id="manageBtn2">지시문</button>
@@ -292,6 +311,22 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
       <label>지시문</label>
       <button class="btn" id="manageFromSettings">저장된 지시문 관리</button>
       <div class="hint">지시문은 대화 화면 위쪽 버튼에서 대화마다 따로 바꿀 수 있어요.</div>
+    </div>
+    <hr>
+    <div class="field">
+      <label>요금 계산</label>
+      <div class="row">
+        <label class="plabel">입력 $/1M<input id="prIn" inputmode="decimal"></label>
+        <label class="plabel">캐시 입력 $/1M<input id="prCached" inputmode="decimal"></label>
+        <label class="plabel">출력 $/1M<input id="prOut" inputmode="decimal"></label>
+      </div>
+      <div class="hint" id="prHint"></div>
+      <div class="row" style="margin-top:10px">
+        <label class="plabel">이미지 출력 $/1M<input id="prImg" inputmode="decimal"></label>
+        <label class="plabel">웹 검색 1회 $<input id="prWeb" inputmode="decimal"></label>
+      </div>
+      <div class="hint">OpenAI가 가격을 바꾸면 여기 숫자만 고쳐 주세요.</div>
+      <button class="btn" id="prReset" style="margin-top:8px">기본 가격으로 되돌리기</button>
     </div>
     <hr>
     <div class="field">
@@ -358,6 +393,22 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
     <div class="dlg-foot">
       <button class="btn" id="mAdd">새 지시문 추가</button>
       <button class="btn primary" id="mClose">닫기</button>
+    </div>
+  </div>
+</dialog>
+<!-- 잔액 맞추기 -->
+<dialog id="dlgB">
+  <div class="dlg">
+    <h3>잔액 맞추기</h3>
+    <p class="sub">OpenAI 사이트(platform.openai.com)의 Settings → Billing에 보이는 Credit balance를 그대로 넣어 주세요. 지금부터 쓴 만큼 여기서 빼서 보여드려요.</p>
+    <div class="field">
+      <label for="bAmt">지금 잔액 ($)</label>
+      <input id="bAmt" inputmode="decimal" placeholder="예: 20.00">
+      <div class="hint" id="bInfo"></div>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" id="bCancel">닫기</button>
+      <button class="btn primary" id="bSave">저장</button>
     </div>
   </div>
 </dialog>
@@ -579,6 +630,120 @@ async function lightbox(a){
   document.body.appendChild(lb);
 }
 
+/* ---------- 요금 계산 ---------- */
+// 2026년 11월 공개 요금 기준 (1M 토큰당 달러). 바뀌면 설정에서 고칠 수 있어요.
+const PRICES = {
+  'gpt-6-astra': { in:10, cached:1, out:50 },
+  'gpt-6-sol': { in:2, cached:0.2, out:10 },
+  'gpt-6-luna': { in:0.10, cached:0.01, out:0.50 },
+  'gpt-5.6-sol': { in:4, cached:0.4, out:20 },
+  'gpt-5.6-terra': { in:2, cached:0.2, out:12 },
+  'gpt-5.6-luna': { in:0.2, cached:0.02, out:1.2 },
+  'gpt-5.5-pro': { in:30, cached:30, out:180 },
+  'gpt-5.5': { in:5, cached:0.5, out:30 },
+  'gpt-5.4-mini': { in:0.75, cached:0.075, out:4.5 },
+  'gpt-5.4': { in:2.5, cached:0.25, out:15 },
+  'gpt-4.1-nano': { in:0.1, cached:0.025, out:0.4 },
+  'gpt-4.1-mini': { in:0.4, cached:0.1, out:1.6 },
+  'gpt-4.1': { in:2, cached:0.5, out:8 },
+  'gpt-4o-mini': { in:0.15, cached:0.075, out:0.6 },
+  'gpt-4o': { in:2.5, cached:1.25, out:10 }
+};
+const IMG_PRICES = { 'gpt-image-2':30, 'gpt-image-1.5':30, 'gpt-image-1':40, 'gpt-image-1-mini':8 };
+const IMG_TOKENS = { low:{ sq:272, land:400, port:408 }, medium:{ sq:1056, land:1568, port:1584 }, high:{ sq:4160, land:6208, port:6240 } };
+const WEB_PRICE = 0.01;
+
+function defaultPrice(model){
+  const k = Object.keys(PRICES).filter(k => (model || '').startsWith(k)).sort((a, b) => b.length - a.length)[0];
+  return k ? PRICES[k] : null;
+}
+function priceFor(model){ return settings.priceOverrides?.[model] || defaultPrice(model) }
+const imgModelName = m => (!m || m === 'auto') ? 'gpt-image-2' : m;
+const defaultImgPrice = m => IMG_PRICES[imgModelName(m)] ?? 30;
+const imgPrice = () => settings.imgPrice ?? defaultImgPrice(settings.imageModel);
+const webPrice = () => settings.webPrice ?? WEB_PRICE;
+
+function imgCost(it){
+  const q = IMG_TOKENS[it.quality] || IMG_TOKENS.high;
+  const [w, h] = String(it.size || '1024x1024').split('x').map(Number);
+  const shape = !w || !h || w === h ? 'sq' : (w > h ? 'land' : 'port');
+  return (q[shape] + 200) * imgPrice() / 1e6;   // 200 = 중간 미리보기 2장
+}
+function calcCost(resp){
+  const u = resp.usage || {};
+  const p = priceFor(settings.model) || defaultPrice(resp.model);
+  let c = 0;
+  if (p){
+    const cached = u.input_tokens_details?.cached_tokens || 0;
+    c += ((u.input_tokens || 0) - cached) * p.in / 1e6 + cached * (p.cached ?? p.in) / 1e6 + (u.output_tokens || 0) * p.out / 1e6;
+  }
+  for (const it of (resp.output || [])){
+    if (it.type === 'web_search_call') c += webPrice();
+    if (it.type === 'image_generation_call' && it.result) c += imgCost(it);
+  }
+  return { c, known: !!p };
+}
+
+/* ---------- 사용 기록과 잔액 ---------- */
+const deviceId = LS.get('deviceId', null) || (() => { const d = uid(); LS.set('deviceId', d); return d })();
+let usageMine = LS.get('usageMine', { events:[], monthly:{}, updated:0 });
+let usageOthers = LS.get('usageOthers', {});
+let balanceBase = LS.get('balanceBase', null);
+const ymOf = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') };
+const money = (x, small) => '$' + (small && x > 0 && x < 0.01 ? x.toFixed(4) : x.toFixed(2));
+
+function recordCost(c){
+  if (!(c > 0)) return;
+  usageMine.events.push({ t: Date.now(), c: Math.round(c * 1e6) / 1e6 });
+  if (usageMine.events.length > 1500){
+    const cut = balanceBase?.at || Date.now();
+    const keep = [];
+    for (const e of usageMine.events){
+      if (e.t < cut){ const k = ymOf(e.t); usageMine.monthly[k] = (usageMine.monthly[k] || 0) + e.c } else keep.push(e);
+    }
+    usageMine.events = keep;
+  }
+  usageMine.updated = Date.now(); LS.set('usageMine', usageMine);
+  renderWallet();
+}
+const allUsage = () => [usageMine, ...Object.values(usageOthers)];
+function spentSince(t){ let s = 0; for (const u of allUsage()) for (const e of (u.events || [])) if (e.t >= t) s += e.c; return s }
+function monthSpent(){
+  const cur = ymOf(Date.now()); let s = 0;
+  for (const u of allUsage()){ s += u.monthly?.[cur] || 0; for (const e of (u.events || [])) if (ymOf(e.t) === cur) s += e.c }
+  return s;
+}
+function currentBalance(){ return balanceBase ? balanceBase.amount - spentSince(balanceBase.at) : null }
+function renderWallet(){
+  const w = $('wallet'), bal = currentBalance();
+  $('wSub').textContent = '이번 달 약 ' + money(monthSpent()) + ' 사용';
+  if (bal === null){
+    w.className = 'wallet empty'; $('wBal').textContent = '입력하기'; $('wFill').style.width = '0';
+    return;
+  }
+  const pct = balanceBase.amount > 0 ? Math.max(0, Math.min(1, bal / balanceBase.amount)) : 0;
+  w.className = 'wallet' + (bal < Math.max(1, balanceBase.amount * 0.1) ? ' low' : '');
+  $('wBal').textContent = '약 ' + money(Math.max(bal, 0));
+  $('wFill').style.width = (pct * 100).toFixed(1) + '%';
+}
+function openBalance(){
+  const bal = currentBalance();
+  $('bAmt').value = bal === null ? '' : Math.max(bal, 0).toFixed(2);
+  $('bInfo').textContent = balanceBase
+    ? `${new Date(balanceBase.at).toLocaleDateString('ko-KR')}에 ${money(balanceBase.amount)}로 맞춘 뒤 약 ${money(spentSince(balanceBase.at))} 썼어요.`
+    : '충전할 때나 가끔 사이트 금액을 확인할 때 다시 맞춰 주시면 정확해져요.';
+  $('dlgB').showModal(); $('bAmt').focus();
+}
+$('wallet').onclick = () => { $('app').classList.remove('open'); openBalance() };
+$('bCancel').onclick = () => $('dlgB').close();
+$('bSave').onclick = () => {
+  const v = parseFloat(String($('bAmt').value).replace(/[$,\s]/g, ''));
+  if (!(v >= 0)){ toast('금액을 숫자로 넣어 주세요'); return }
+  balanceBase = { amount: v, at: Date.now(), updated: Date.now(), driveId: balanceBase?.driveId };
+  LS.set('balanceBase', balanceBase); renderWallet(); queueSync();
+  $('dlgB').close(); toast('잔액을 ' + money(v) + '로 맞췄어요');
+};
+
 /* ---------- 화면 그리기 ---------- */
 const ICON_SEND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
 const ICON_STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
@@ -636,7 +801,9 @@ function msgEl(m){
   const t = document.createElement('div'); t.className = 'msg-tools';
   const cp = document.createElement('button'); cp.textContent = '복사';
   cp.onclick = () => navigator.clipboard.writeText(m.content).then(() => toast('복사했어요'));
-  t.appendChild(cp); d.appendChild(t);
+  t.appendChild(cp);
+  if (m.cost > 0){ const k = document.createElement('span'); k.className = 'cost'; k.textContent = '약 ' + money(m.cost, true); t.appendChild(k) }
+  d.appendChild(t);
   return d;
 }
 
@@ -779,7 +946,8 @@ async function readSSE(res, h){
           else if (ev.item?.type === 'web_search_call') h.search(false);
           else if (ev.item?.type === 'message') for (const p of (ev.item.content || [])) for (const a of (p.annotations || [])) h.annot(a);
           break;
-        case 'response.incomplete': toast('답변이 길어서 중간에 끊겼어요'); break;
+        case 'response.completed': h.done && h.done(ev.response || {}); break;
+        case 'response.incomplete': toast('답변이 길어서 중간에 끊겼어요'); h.done && h.done(ev.response || {}); break;
         case 'response.failed': throw new Error(ev.response?.error?.message || '답변을 만들지 못했어요');
         case 'error': throw new Error(ev.message || ev.error?.message || '오류가 났어요');
       }
@@ -822,6 +990,11 @@ async function send(){
   const imgs = {}; const sources = new Map(); let searchEl = null;
   const status = t => { const st = document.createElement('div'); st.className = 'gen-status'; st.textContent = t; el.insertBefore(st, el.querySelector('.msg-tools')); scrollDown(true); return st };
   const h = {
+    done(resp){
+      const { c, known } = calcCost(resp);
+      reply.cost = (reply.cost || 0) + c; recordCost(c);
+      if (!known && !toast.priceWarned){ toast.priceWarned = true; toast('이 모델 가격을 몰라서 금액 계산에서 빠졌어요. 설정에서 가격을 넣어 주세요') }
+    },
     msgStart(){ if (reply.content && !reply.content.endsWith('\n\n')) onText('\n\n') },
     text: onText,
     annot(a){ if (a && a.type === 'url_citation' && a.url && !sources.has(a.url)) sources.set(a.url, a.title || a.url) },
@@ -887,6 +1060,10 @@ async function send(){
       reply.content = reply.content.trim();
       body.innerHTML = reply.content ? md(reply.content) : '';
       if (!reply.atts.length) delete reply.atts;
+      if (reply.cost > 0){
+        const k = document.createElement('span'); k.className = 'cost'; k.textContent = '약 ' + money(reply.cost, true);
+        el.querySelector('.msg-tools')?.appendChild(k);
+      } else delete reply.cost;
       c.messages.push(reply); c.updated = Date.now(); saveConvs(); renderList(); queueSync();
     } else if (el.isConnected){ el.remove() }
     updateSendBtn();
@@ -914,6 +1091,33 @@ function fillModels(ids, sel){
   for (const id of ids){ const o = document.createElement('option'); o.value = o.textContent = id; s.appendChild(o) }
   if (sel && ids.includes(sel)) s.value = sel;
 }
+
+function fillPriceFields(model, useDefault){
+  const p = (useDefault ? defaultPrice(model) : priceFor(model)) || {};
+  $('prIn').value = p.in ?? ''; $('prCached').value = p.cached ?? ''; $('prOut').value = p.out ?? '';
+  $('prHint').textContent = model
+    ? (defaultPrice(model) ? `지금 고른 모델(${model})의 가격이에요.` : `${model}은 가격표에 없어요. 직접 넣어 주시면 계산에 반영돼요.`)
+    : '모델을 먼저 골라 주세요.';
+}
+function savePriceFields(){
+  const model = settings.model; if (!model) return;
+  const num = id => { const v = parseFloat($(id).value); return isFinite(v) && v >= 0 ? v : null };
+  const p = { in: num('prIn'), cached: num('prCached'), out: num('prOut') };
+  const d = defaultPrice(model);
+  settings.priceOverrides = settings.priceOverrides || {};
+  if (p.in === null || p.out === null || (d && d.in === p.in && d.out === p.out && (d.cached ?? d.in) === (p.cached ?? p.in))) delete settings.priceOverrides[model];
+  else settings.priceOverrides[model] = { in: p.in, cached: p.cached ?? p.in, out: p.out };
+  const ip = num('prImg'), wp = num('prWeb');
+  if (ip === null || ip === defaultImgPrice(settings.imageModel)) delete settings.imgPrice; else settings.imgPrice = ip;
+  if (wp === null || wp === WEB_PRICE) delete settings.webPrice; else settings.webPrice = wp;
+}
+$('sModel').addEventListener('change', () => fillPriceFields($('sModel').value, false));
+$('sImgModel').addEventListener('change', () => { if (settings.imgPrice === undefined) $('prImg').value = defaultImgPrice($('sImgModel').value) });
+$('prReset').onclick = () => {
+  fillPriceFields($('sModel').value, true);
+  $('prImg').value = defaultImgPrice($('sImgModel').value); $('prWeb').value = WEB_PRICE;
+  toast('기본 가격을 채웠어요. 저장을 누르면 적용돼요');
+};
 
 function fillImageModels(ids, sel){
   const s = $('sImgModel'); s.innerHTML = '';
@@ -1063,6 +1267,7 @@ function disconnectGoogle(){
   LS.set('gtoken', null); LS.set('gconnected', false);
   for (const c of Object.values(convs)) delete c.driveId;
   delete promptsStore.driveId; LS.set('prompts', promptsStore);
+  if (balanceBase){ delete balanceBase.driveId; LS.set('balanceBase', balanceBase) }
   saveConvs(); setSync(); toast('연결을 해제했어요');
 }
 
@@ -1113,6 +1318,10 @@ async function uploadPrompts(){
   const data = { ...promptsStore }; delete data.driveId;
   promptsStore.driveId = await uploadFile('prompts.json', data, promptsStore.updated, promptsStore.driveId);
 }
+async function uploadBalance(){
+  const d = { amount: balanceBase.amount, at: balanceBase.at, updated: balanceBase.updated };
+  balanceBase.driveId = await uploadFile('balance.json', d, balanceBase.updated, balanceBase.driveId);
+}
 async function download(fileId){
   return (await gfetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`)).json();
 }
@@ -1125,10 +1334,12 @@ async function sync(){
       await gfetch('https://www.googleapis.com/drive/v3/files/' + pendingDeletes[0], { method:'DELETE' });
       pendingDeletes.shift(); LS.set('pendingDeletes', pendingDeletes);
     }
-    const remote = {}; let remotePrompts = null; remoteAtts = {};
+    const remote = {}; let remotePrompts = null, remoteBalance = null; const remoteUsage = {}; remoteAtts = {};
     for (const f of await listRemote()){
       const upd = Number(f.appProperties?.updated || 0);
       if (f.name === 'prompts.json'){ remotePrompts = { fileId: f.id, updated: upd }; continue }
+      if (f.name === 'balance.json'){ remoteBalance = { fileId: f.id, updated: upd }; continue }
+      const um = f.name.match(/^usage-(.+)\.json$/); if (um){ remoteUsage[um[1]] = { fileId: f.id, updated: upd }; continue }
       const am = f.name.match(/^att-(.+)\.json$/); if (am){ remoteAtts[am[1]] = f.id; continue }
       const m = f.name.match(/^conv-(.+)\.json$/); if (!m) continue;
       remote[m[1]] = { fileId: f.id, updated: upd };
@@ -1173,6 +1384,30 @@ async function sync(){
       delete promptsStore.driveId; await uploadPrompts();
     }
     LS.set('prompts', promptsStore);
+    // 잔액 기준
+    if (remoteBalance){
+      if (remoteBalance.updated > (balanceBase?.updated || 0)){
+        const d = await download(remoteBalance.fileId);
+        balanceBase = { amount: d.amount, at: d.at, updated: d.updated || remoteBalance.updated, driveId: remoteBalance.fileId };
+      } else if (balanceBase && balanceBase.updated > remoteBalance.updated){
+        balanceBase.driveId = remoteBalance.fileId; await uploadBalance();
+      } else if (balanceBase) balanceBase.driveId = remoteBalance.fileId;
+    } else if (balanceBase){ delete balanceBase.driveId; await uploadBalance() }
+    LS.set('balanceBase', balanceBase);
+    // 사용 기록: 내 기기 것은 올리고, 다른 기기 것은 받아오기
+    const mine = remoteUsage[deviceId];
+    if ((usageMine.events.length || Object.keys(usageMine.monthly).length) && (!mine || usageMine.updated > mine.updated)){
+      await uploadFile('usage-' + deviceId + '.json', { events: usageMine.events, monthly: usageMine.monthly }, usageMine.updated, mine?.fileId);
+    }
+    for (const [dev, r] of Object.entries(remoteUsage)){
+      if (dev === deviceId) continue;
+      if (!usageOthers[dev] || r.updated > (usageOthers[dev].updated || 0)){
+        const d = await download(r.fileId);
+        usageOthers[dev] = { events: d.events || [], monthly: d.monthly || {}, updated: r.updated };
+      }
+    }
+    LS.set('usageOthers', usageOthers);
+    renderWallet();
     LS.set('lastSync', Date.now());
     renderList(); if (!busy) renderMsgs();
     if ($('dlgM').open && $('mEditor').hidden) renderManage();
@@ -1190,6 +1425,8 @@ function openSettings(){
   fillImageModels(settings.imageModels || [], settings.imageModel);
   $('sImg').checked = !!settings.imageGen;
   $('sWeb').checked = !!settings.webSearch;
+  fillPriceFields(settings.model, false);
+  $('prImg').value = imgPrice(); $('prWeb').value = webPrice();
   $('dlg').showModal();
 }
 function saveSettings(){
@@ -1200,6 +1437,7 @@ function saveSettings(){
   settings.imageGen = $('sImg').checked;
   settings.imageModel = $('sImgModel').value || 'auto';
   settings.webSearch = $('sWeb').checked;
+  savePriceFields();
   LS.set('settings', settings);
   if (clientChanged){ tokenClient = null; initGoogle() }
   $('dlg').close(); renderMsgs(); toast('저장했어요');
@@ -1249,7 +1487,7 @@ $('gDisconnect').onclick = disconnectGoogle;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible'){ setSync(); if (validToken()) sync() } });
 
 if (currentId && !convs[currentId]) currentId = null;
-renderList(); renderMsgs(); updateSendBtn(); setSync();
+renderList(); renderMsgs(); updateSendBtn(); setSync(); renderWallet();
 if (window.google?.accounts?.oauth2) initGoogle();
 </script>
 </body>
