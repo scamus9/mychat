@@ -325,8 +325,11 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
         <label class="plabel">이미지 출력 $/1M<input id="prImg" inputmode="decimal"></label>
         <label class="plabel">웹 검색 1회 $<input id="prWeb" inputmode="decimal"></label>
       </div>
-      <div class="hint">OpenAI가 가격을 바꾸면 여기 숫자만 고쳐 주세요.</div>
-      <button class="btn" id="prReset" style="margin-top:8px">기본 가격으로 되돌리기</button>
+      <div class="hint" id="prAuto">하루에 한 번 OpenAI 공식 요금표를 자동으로 확인해서 채워요. 직접 고친 숫자가 있으면 그게 우선이에요.</div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn" id="prCheck">지금 가격 확인</button>
+        <button class="btn" id="prReset">확인된 가격으로 되돌리기</button>
+      </div>
     </div>
     <hr>
     <div class="field">
@@ -657,11 +660,14 @@ function defaultPrice(model){
   const k = Object.keys(PRICES).filter(k => (model || '').startsWith(k)).sort((a, b) => b.length - a.length)[0];
   return k ? PRICES[k] : null;
 }
-function priceFor(model){ return settings.priceOverrides?.[model] || defaultPrice(model) }
+let autoPrices = LS.get('autoPrices', { chat:{}, img:{}, web:null, at:0 });
+function basePrice(model){ return autoPrices.chat[model] || defaultPrice(model) }
+function priceFor(model){ return settings.priceOverrides?.[model] || basePrice(model) }
 const imgModelName = m => (!m || m === 'auto') ? 'gpt-image-2' : m;
-const defaultImgPrice = m => IMG_PRICES[imgModelName(m)] ?? 30;
+const defaultImgPrice = m => autoPrices.img[imgModelName(m)] ?? IMG_PRICES[imgModelName(m)] ?? 30;
+const baseWeb = () => autoPrices.web ?? WEB_PRICE;
 const imgPrice = () => settings.imgPrice ?? defaultImgPrice(settings.imageModel);
-const webPrice = () => settings.webPrice ?? WEB_PRICE;
+const webPrice = () => settings.webPrice ?? baseWeb();
 
 function imgCost(it){
   const q = IMG_TOKENS[it.quality] || IMG_TOKENS.high;
@@ -669,9 +675,9 @@ function imgCost(it){
   const shape = !w || !h || w === h ? 'sq' : (w > h ? 'land' : 'port');
   return (q[shape] + 200) * imgPrice() / 1e6;   // 200 = 중간 미리보기 2장
 }
-function calcCost(resp){
+function calcCost(resp, model){
   const u = resp.usage || {};
-  const p = priceFor(settings.model) || defaultPrice(resp.model);
+  const p = priceFor(model || settings.model) || defaultPrice(resp.model);
   let c = 0;
   if (p){
     const cached = u.input_tokens_details?.cached_tokens || 0;
@@ -682,6 +688,83 @@ function calcCost(resp){
     if (it.type === 'image_generation_call' && it.result) c += imgCost(it);
   }
   return { c, known: !!p };
+}
+
+/* ---------- 하루 한 번 가격 자동 확인 ---------- */
+let priceChecking = false;
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+function cheapModel(){
+  const ids = settings.models || [];
+  for (const pref of ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.4-mini', 'gpt-4.1-mini', 'gpt-4o-mini']){
+    const hit = ids.find(id => id === pref) || ids.find(id => id.startsWith(pref));
+    if (hit) return hit;
+  }
+  return settings.model;
+}
+const within = (v, ref, lo = 0.2, hi = 5) => !ref || (v / ref >= lo && v / ref <= hi);
+const changed = (a, b) => !a || !b || Math.abs(a - b) > 1e-6;
+
+async function checkPrices(force){
+  if (priceChecking || !settings.apiKey || !settings.model) return;
+  if (!force && autoPrices.at && sameDay(autoPrices.at, Date.now()) && autoPrices.chat[settings.model]) return;
+  priceChecking = true;
+  const chatModel = settings.model, imgModel = imgModelName(settings.imageModel), checker = cheapModel();
+  if (force) toast('최신 가격을 확인하는 중이에요');
+  const field = (extra) => ({ type:'object', additionalProperties:false, properties:{ found:{ type:'boolean' }, ...extra }, required:['found', ...Object.keys(extra)] });
+  const schema = { type:'object', additionalProperties:false,
+    properties:{
+      chat: field({ input:{ type:'number' }, cached_input:{ type:'number' }, output:{ type:'number' } }),
+      image: field({ image_output:{ type:'number' } }),
+      web_search_per_1k_calls:{ type:'number' }
+    }, required:['chat', 'image', 'web_search_per_1k_calls'] };
+  const prompt = `Look up the current official OpenAI API pricing (standard processing, short context) on openai.com or developers.openai.com only.
+Return USD per 1M tokens for:
+1) chat model "${chatModel}": input, cached input, output
+2) image model "${imgModel}": image output tokens
+3) the web_search tool: USD per 1,000 calls for reasoning / gpt-5 family models
+If a price is not clearly listed on an official OpenAI page, set found=false and use 0. Do not guess.`;
+  const body = (withFilter) => JSON.stringify({
+    model: checker, store: false, input: prompt,
+    tools: [withFilter ? { type:'web_search', filters:{ allowed_domains:['openai.com', 'developers.openai.com', 'platform.openai.com'] } } : { type:'web_search' }],
+    text: { format: { type:'json_schema', name:'prices', schema, strict:true } }
+  });
+  try{
+    let res = await fetch('https://api.openai.com/v1/responses', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + settings.apiKey }, body: body(true) });
+    if (res.status === 400) res = await fetch('https://api.openai.com/v1/responses', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + settings.apiKey }, body: body(false) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error?.message || ('가격 확인 실패 (' + res.status + ')'));
+    recordCost(calcCost(data, checker).c);
+    const txt = (data.output || []).filter(o => o.type === 'message').flatMap(o => o.content || []).find(p => p.type === 'output_text')?.text;
+    const r = JSON.parse(txt || '{}');
+    const notes = [];
+
+    const prevChat = basePrice(chatModel);
+    const ch = r.chat || {};
+    if (ch.found && ch.input > 0 && ch.output > 0 && ch.input <= 200 && ch.output <= 1000
+        && within(ch.input, prevChat?.in) && within(ch.output, prevChat?.out)){
+      const cached = ch.cached_input > 0 && ch.cached_input <= ch.input ? ch.cached_input : (prevChat?.cached ?? ch.input);
+      const next = { in: ch.input, cached, out: ch.output };
+      if (prevChat && (changed(prevChat.in, next.in) || changed(prevChat.out, next.out))) notes.push(chatModel);
+      autoPrices.chat[chatModel] = next;
+    }
+    const prevImg = defaultImgPrice(imgModel);
+    const im = r.image || {};
+    if (im.found && im.image_output > 0 && im.image_output <= 500 && within(im.image_output, prevImg)){
+      if (changed(prevImg, im.image_output)) notes.push(imgModel);
+      autoPrices.img[imgModel] = im.image_output;
+    }
+    const w = r.web_search_per_1k_calls;
+    if (w >= 1 && w <= 100 && within(w / 1000, baseWeb())){
+      if (changed(baseWeb(), w / 1000)) notes.push('웹 검색');
+      autoPrices.web = w / 1000;
+    }
+    autoPrices.at = Date.now(); LS.set('autoPrices', autoPrices);
+    if ($('dlg').open) refreshPriceFields();
+    if (notes.length) toast(notes.join(', ') + ' 가격이 바뀌어서 반영했어요');
+    else if (force) toast('가격을 확인했어요. 바뀐 건 없어요');
+  }catch(e){
+    if (force) toast('가격을 확인하지 못했어요: ' + e.message);
+  }finally{ priceChecking = false }
 }
 
 /* ---------- 사용 기록과 잔액 ---------- */
@@ -1092,31 +1175,50 @@ function fillModels(ids, sel){
   if (sel && ids.includes(sel)) s.value = sel;
 }
 
+function refreshPriceFields(){
+  fillPriceFields($('sModel').value || settings.model, false);
+  $('prImg').value = settings.imgPrice ?? defaultImgPrice($('sImgModel').value);
+  $('prWeb').value = webPrice();
+}
 function fillPriceFields(model, useDefault){
-  const p = (useDefault ? defaultPrice(model) : priceFor(model)) || {};
+  const p = (useDefault ? basePrice(model) : priceFor(model)) || {};
   $('prIn').value = p.in ?? ''; $('prCached').value = p.cached ?? ''; $('prOut').value = p.out ?? '';
-  $('prHint').textContent = model
-    ? (defaultPrice(model) ? `지금 고른 모델(${model})의 가격이에요.` : `${model}은 가격표에 없어요. 직접 넣어 주시면 계산에 반영돼요.`)
-    : '모델을 먼저 골라 주세요.';
+  const manual = !!settings.priceOverrides?.[model];
+  $('prHint').textContent = !model ? '모델을 먼저 골라 주세요.'
+    : !basePrice(model) ? `${model} 가격을 아직 몰라요. 지금 가격 확인을 눌러 주세요.`
+    : `${model} 가격이에요` + (manual ? ' (직접 고친 값)' : '') + '.';
+  $('prAuto').textContent = autoPrices.at
+    ? `${new Date(autoPrices.at).toLocaleString('ko-KR', { month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' })}에 공식 요금표로 자동 확인했어요. 직접 고친 숫자가 있으면 그게 우선이에요.`
+    : '하루에 한 번 OpenAI 공식 요금표를 자동으로 확인해서 채워요. 직접 고친 숫자가 있으면 그게 우선이에요.';
 }
 function savePriceFields(){
   const model = settings.model; if (!model) return;
   const num = id => { const v = parseFloat($(id).value); return isFinite(v) && v >= 0 ? v : null };
   const p = { in: num('prIn'), cached: num('prCached'), out: num('prOut') };
-  const d = defaultPrice(model);
+  const d = basePrice(model);
   settings.priceOverrides = settings.priceOverrides || {};
   if (p.in === null || p.out === null || (d && d.in === p.in && d.out === p.out && (d.cached ?? d.in) === (p.cached ?? p.in))) delete settings.priceOverrides[model];
   else settings.priceOverrides[model] = { in: p.in, cached: p.cached ?? p.in, out: p.out };
   const ip = num('prImg'), wp = num('prWeb');
   if (ip === null || ip === defaultImgPrice(settings.imageModel)) delete settings.imgPrice; else settings.imgPrice = ip;
-  if (wp === null || wp === WEB_PRICE) delete settings.webPrice; else settings.webPrice = wp;
+  if (wp === null || Math.abs(wp - baseWeb()) < 1e-9) delete settings.webPrice; else settings.webPrice = wp;
 }
 $('sModel').addEventListener('change', () => fillPriceFields($('sModel').value, false));
 $('sImgModel').addEventListener('change', () => { if (settings.imgPrice === undefined) $('prImg').value = defaultImgPrice($('sImgModel').value) });
 $('prReset').onclick = () => {
   fillPriceFields($('sModel').value, true);
-  $('prImg').value = defaultImgPrice($('sImgModel').value); $('prWeb').value = WEB_PRICE;
-  toast('기본 가격을 채웠어요. 저장을 누르면 적용돼요');
+  $('prImg').value = defaultImgPrice($('sImgModel').value); $('prWeb').value = baseWeb();
+  toast('확인된 가격을 채웠어요. 저장을 누르면 적용돼요');
+};
+$('prCheck').onclick = async () => {
+  // 화면에서 고른 모델 기준으로 확인
+  const keepModel = settings.model, keepImg = settings.imageModel, keepKey = settings.apiKey;
+  settings.model = $('sModel').value || settings.model;
+  settings.imageModel = $('sImgModel').value || settings.imageModel;
+  settings.apiKey = $('sKey').value.trim() || settings.apiKey;
+  const p = checkPrices(true);
+  settings.model = keepModel; settings.imageModel = keepImg; settings.apiKey = keepKey;
+  await p;
 };
 
 function fillImageModels(ids, sel){
@@ -1425,11 +1527,11 @@ function openSettings(){
   fillImageModels(settings.imageModels || [], settings.imageModel);
   $('sImg').checked = !!settings.imageGen;
   $('sWeb').checked = !!settings.webSearch;
-  fillPriceFields(settings.model, false);
-  $('prImg').value = imgPrice(); $('prWeb').value = webPrice();
+  refreshPriceFields();
   $('dlg').showModal();
 }
 function saveSettings(){
+  const prevModel = settings.model, prevImg = settings.imageModel;
   const clientChanged = settings.clientId !== $('sClient').value.trim();
   settings.apiKey = $('sKey').value.trim();
   settings.model = $('sModel').value || settings.model;
@@ -1441,6 +1543,8 @@ function saveSettings(){
   LS.set('settings', settings);
   if (clientChanged){ tokenClient = null; initGoogle() }
   $('dlg').close(); renderMsgs(); toast('저장했어요');
+  if (settings.model !== prevModel && !autoPrices.chat[settings.model]) checkPrices(true);
+  else if (imgModelName(settings.imageModel) !== imgModelName(prevImg) && autoPrices.img[imgModelName(settings.imageModel)] === undefined) checkPrices(true);
 }
 
 /* ---------- 입력창 ---------- */
@@ -1484,7 +1588,8 @@ $('gConnect').onclick = () => {
   connectGoogle();
 };
 $('gDisconnect').onclick = disconnectGoogle;
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible'){ setSync(); if (validToken()) sync() } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible'){ setSync(); if (validToken()) sync(); checkPrices(false) } });
+setTimeout(() => checkPrices(false), 4000);
 
 if (currentId && !convs[currentId]) currentId = null;
 renderList(); renderMsgs(); updateSendBtn(); setSync(); renderWallet();
