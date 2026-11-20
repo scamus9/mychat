@@ -31,6 +31,7 @@
   }
 }
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html,body{height:100%;margin:0}
 body{
   background:var(--bg); color:var(--ink);
@@ -114,6 +115,14 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .att-img img{display:block;max-width:220px;max-height:220px}
 .att-img.big img{max-width:min(420px,100%);max-height:none;width:100%}
 .att-img.big{width:min(420px,100%)}
+.att-img.drawing{
+  aspect-ratio:1/1;display:grid;place-items:center;color:var(--muted);font-size:14px;cursor:default;text-align:center;padding:16px;
+  background:linear-gradient(110deg,var(--surface) 30%,color-mix(in srgb,var(--accent) 14%,var(--surface)) 50%,var(--surface) 70%);
+  background-size:250% 100%;animation:shimmer 1.6s linear infinite
+}
+@keyframes shimmer{to{background-position:-150% 0}}
+@media (prefers-reduced-motion:reduce){.att-img.drawing{animation:none}}
+.att-img.preview img{filter:saturate(.9)}
 .att-img.missing{cursor:default;font-size:12.5px;color:var(--muted);padding:12px}
 .fchip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:7px 12px;font-size:13.5px;max-width:260px}
 .fchip span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -137,7 +146,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
   max-width:720px;margin:0 auto;background:var(--surface);
   border:1px solid var(--line);border-radius:20px;padding:8px
 }
-.box-row{display:flex;align-items:flex-end;gap:6px}
+.box-row{display:flex;align-items:flex-end;gap:6px;min-height:38px}
 .tray{display:flex;flex-wrap:wrap;gap:8px;padding:4px 4px 10px}
 .tchip{position:relative;height:56px;border:1px solid var(--line);border-radius:10px;background:var(--bg);display:flex;align-items:center}
 .tchip img{width:56px;height:56px;object-fit:cover;border-radius:9px;display:block}
@@ -631,10 +640,17 @@ function msgEl(m){
   return d;
 }
 
+// 맨 아래를 보고 있으면 계속 맨 아래에 붙어 있고, 위로 올려서 읽는 중이면 그대로 둠
+let stick = true;
 function scrollDown(force){
   const box = $('msgs');
-  if (force || box.scrollHeight - box.scrollTop - box.clientHeight < 140) box.scrollTop = box.scrollHeight;
+  if (force) stick = true;
+  if (stick) box.scrollTop = box.scrollHeight;
 }
+$('msgs').addEventListener('scroll', () => {
+  const b = $('msgs'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
+}, { passive:true });
+if (window.ResizeObserver) new ResizeObserver(() => { if (stick) $('msgs').scrollTop = $('msgs').scrollHeight }).observe($('col'));
 
 function updateSendBtn(){
   const btn = $('sendBtn');
@@ -815,19 +831,22 @@ async function send(){
     },
     imgStart(id){
       if (imgs[id]) return;
-      const st = status('이미지를 그리는 중이에요. 30초쯤 걸릴 수 있어요');
-      const b = document.createElement('div'); b.className = 'att-img big'; b.hidden = true;
-      const im = document.createElement('img'); im.alt = '그리는 중인 이미지'; b.appendChild(im);
-      genBox.hidden = false; genBox.appendChild(b);
-      imgs[id] = { st, b, im };
+      const b = document.createElement('div'); b.className = 'att-img big drawing';
+      b.textContent = '이미지를 그리는 중이에요. 30초에서 1분쯤 걸려요';
+      genBox.hidden = false; genBox.appendChild(b); scrollDown(true);
+      imgs[id] = { b, im: null };
     },
     imgPartial(id, b64){
       if (!b64) return;
       h.imgStart(id); const x = imgs[id];
-      x.im.src = 'data:image/png;base64,' + b64; x.b.hidden = false; scrollDown();
+      if (!x.im){
+        x.im = document.createElement('img'); x.im.alt = '그리는 중인 이미지 미리보기';
+        x.b.textContent = ''; x.b.appendChild(x.im); x.b.classList.remove('drawing'); x.b.classList.add('preview');
+      }
+      x.im.src = 'data:image/png;base64,' + b64; scrollDown();
     },
     imgDone(item){
-      const x = imgs[item.id]; if (x) x.st.remove();
+      const x = imgs[item.id];
       if (!item.result){ if (x) x.b.remove(); toast('이미지를 만들지 못했어요'); return }
       const aid = uid(), fmt = item.output_format || 'png';
       const v = { kind:'image', mime:'image/' + fmt, name:`image-${aid}.${fmt}`, data:`data:image/${fmt};base64,` + item.result };
@@ -862,7 +881,8 @@ async function send(){
   }finally{
     busy = false; abortCtl = null; body.classList.remove('cursor');
     el.querySelectorAll('.gen-status').forEach(x => x.remove());
-    genBox.querySelectorAll('div.att-img').forEach(x => { if (x.hidden || !x.querySelector('img')?.src) x.remove() });
+    genBox.querySelectorAll('div.att-img').forEach(x => x.remove());
+    if (!genBox.children.length) genBox.hidden = true;
     if (reply.content || reply.atts.length){
       reply.content = reply.content.trim();
       body.innerHTML = reply.content ? md(reply.content) : '';
