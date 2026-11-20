@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="My Chat">
+<meta name="theme-color" content="#E9EDF2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#11151B" media="(prefers-color-scheme: dark)">
+<title>My Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="window.initGoogle && initGoogle()"></script>
+<style>
+:root{
+  --bg:#E9EDF2; --side:#DFE4EB; --surface:#FFFFFF; --ink:#1B2330; --muted:#647083;
+  --line:#CDD4DE; --accent:#2B55D6; --accent-ink:#FFFFFF; --user:#DCE5FB; --danger:#C2362F;
+  --ok:#1E8A55; --warn:#B7791F;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#11151B; --side:#171C24; --surface:#1D232D; --ink:#E4E9F0; --muted:#8C97A8;
+    --line:#2B3340; --accent:#7D9BFF; --accent-ink:#0E1420; --user:#25304A; --danger:#FF7A72;
+    --ok:#5BD39A; --warn:#F2C065;
+    color-scheme: dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Sans KR",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:16px; line-height:1.6; -webkit-text-size-adjust:100%;
+}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{display:flex;height:100dvh;padding-top:env(safe-area-inset-top,0px)}
+aside{
+  width:280px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)
+}
+.side-head{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 8px}
+.side-head h1{font-size:15px;font-weight:600;margin:0;letter-spacing:-.01em}
+.btn-new{
+  border:0;background:var(--accent);color:var(--accent-ink);border-radius:999px;
+  padding:6px 14px;font-size:14px;font-weight:500
+}
+#list{flex:1;overflow-y:auto;padding:4px 8px}
+.item{
+  display:flex;align-items:center;gap:6px;width:100%;border:0;background:none;text-align:left;
+  padding:9px 10px;border-radius:8px;font-size:14.5px;color:var(--ink)
+}
+.item span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.item:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.item.active{background:var(--surface);font-weight:500}
+.item .del{opacity:0;border:0;background:none;color:var(--muted);padding:0 4px;font-size:16px;line-height:1}
+.item:hover .del,.item.active .del{opacity:1}
+.side-foot{border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:8px;align-items:center}
+.sync{
+  flex:1;display:flex;align-items:center;gap:8px;border:0;background:none;padding:6px 4px;
+  font-size:13px;color:var(--muted);text-align:left
+}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.busy{background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.dot.busy{animation:none}}
+.icon-btn{border:0;background:none;padding:6px 8px;border-radius:8px;font-size:14px;color:var(--muted)}
+.icon-btn:hover{color:var(--ink);background:color-mix(in srgb,var(--ink) 6%,transparent)}
+
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+.top{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);min-height:52px}
+.top h2{font-size:15px;font-weight:500;margin:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1}
+#menuBtn{display:none}
+#msgs{flex:1;overflow-y:auto;padding:24px 16px 8px}
+.col{max-width:720px;margin:0 auto}
+.msg{margin:0 0 22px}
+.msg.user{display:flex;justify-content:flex-end}
+.msg.user .body{
+  background:var(--user);padding:10px 14px;border-radius:16px 16px 4px 16px;max-width:85%;
+  white-space:pre-wrap;word-break:break-word
+}
+.msg.assistant .body{word-break:break-word}
+.msg.assistant .body > :first-child{margin-top:0}
+.msg.assistant .body > :last-child{margin-bottom:0}
+.body pre{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:13.5px}
+.body code{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.9em}
+.body :not(pre) > code{background:color-mix(in srgb,var(--ink) 8%,transparent);padding:1px 5px;border-radius:4px}
+.body table{border-collapse:collapse;display:block;overflow-x:auto}
+.body th,.body td{border:1px solid var(--line);padding:6px 10px}
+.body a{color:var(--accent)}
+.msg-tools{margin-top:6px}
+.msg-tools button{border:0;background:none;color:var(--muted);font-size:12.5px;padding:2px 0}
+.cursor::after{content:"▍";color:var(--accent);margin-left:2px}
+
+.empty{max-width:420px;margin:18vh auto 0;text-align:center;color:var(--muted)}
+.empty p{margin:0 0 6px}
+.empty .big{font-size:22px;color:var(--ink);font-weight:500;margin-bottom:10px}
+.empty button{margin-top:14px}
+
+.composer{padding:8px 16px calc(12px + env(safe-area-inset-bottom,0px))}
+.box{
+  max-width:720px;margin:0 auto;display:flex;align-items:flex-end;gap:8px;background:var(--surface);
+  border:1px solid var(--line);border-radius:20px;padding:8px 8px 8px 16px
+}
+.box:focus-within{border-color:var(--accent)}
+#input{flex:1;border:0;background:none;resize:none;outline:none;max-height:200px;padding:6px 0;line-height:1.5}
+#sendBtn{
+  border:0;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
+  display:grid;place-items:center;flex-shrink:0
+}
+#sendBtn:disabled{opacity:.35;cursor:default}
+#sendBtn svg{width:18px;height:18px}
+
+dialog{
+  border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);
+  width:min(480px,calc(100vw - 32px));padding:0;max-height:calc(100dvh - 40px)
+}
+dialog::backdrop{background:rgba(10,14,20,.45)}
+.dlg{padding:20px;overflow-y:auto}
+.dlg h3{margin:0 0 16px;font-size:17px;font-weight:600}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:13.5px;font-weight:500;margin-bottom:6px}
+.field input,.field textarea,.field select{
+  width:100%;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 11px;font-size:14.5px
+}
+.field textarea{resize:vertical;min-height:70px}
+.hint{font-size:12.5px;color:var(--muted);margin-top:5px}
+.row{display:flex;gap:8px}
+.row > *{flex:1}
+.btn{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 14px;font-size:14px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+.btn.danger{color:var(--danger)}
+.dlg-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+
+#toast{
+  position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;
+  opacity:0;pointer-events:none;transition:opacity .2s;max-width:calc(100vw - 32px);text-align:center
+}
+#toast.show{opacity:1}
+.scrim{display:none}
+
+@media (max-width:760px){
+  aside{
+    position:fixed;inset:0 auto 0 0;z-index:20;width:82vw;max-width:320px;
+    padding-top:env(safe-area-inset-top,0px);transform:translateX(-100%);transition:transform .22s ease
+  }
+  .app.open aside{transform:none}
+  .app.open .scrim{display:block;position:fixed;inset:0;background:rgba(10,14,20,.4);z-index:15}
+  #menuBtn{display:block}
+  #msgs{padding:18px 14px 8px}
+  .composer{padding-left:10px;padding-right:10px}
+  .item .del{opacity:1}
+}
+@media (prefers-reduced-motion:reduce){aside{transition:none}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside>
+    <div class="side-head">
+      <h1>대화 목록</h1>
+      <button class="btn-new" id="newBtn">새 대화</button>
+    </div>
+    <div id="list"></div>
+    <div class="side-foot">
+      <button class="sync" id="syncBtn"><span class="dot" id="syncDot"></span><span id="syncText">동기화 꺼짐</span></button>
+      <button class="icon-btn" id="setBtn">설정</button>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+  <main>
+    <div class="top">
+      <button class="icon-btn" id="menuBtn" aria-label="대화 목록 열기">☰</button>
+      <h2 id="title">새 대화</h2>
+    </div>
+    <div id="msgs"><div class="col" id="col"></div></div>
+    <div class="composer">
+      <div class="box">
+        <textarea id="input" rows="1" placeholder="메시지를 입력하세요"></textarea>
+        <button id="sendBtn" aria-label="보내기" disabled></button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg">
+    <h3>설정</h3>
+    <div class="field">
+      <label for="sKey">OpenAI API 키</label>
+      <input id="sKey" type="password" autocomplete="off" placeholder="sk-...">
+      <div class="hint">이 기기 안에만 저장돼요. 구글 드라이브에는 올라가지 않아요.</div>
+    </div>
+    <div class="field">
+      <label for="sModel">모델</label>
+      <div class="row">
+        <select id="sModel"></select>
+        <button class="btn" id="loadModels" style="flex:0 0 auto">목록 불러오기</button>
+      </div>
+      <div class="hint">키를 입력한 뒤 목록 불러오기를 누르면 쓸 수 있는 모델이 나와요.</div>
+    </div>
+    <div class="field">
+      <label for="sSystem">기본 지시문 (선택)</label>
+      <textarea id="sSystem" placeholder="예: 항상 한국어로 친절하게 답해줘"></textarea>
+    </div>
+    <hr>
+    <div class="field">
+      <label for="sClient">구글 클라이언트 ID</label>
+      <input id="sClient" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com">
+      <div class="hint">대화를 기기끼리 동기화할 때 필요해요.</div>
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn" id="gConnect">구글 드라이브 연결</button>
+      <button class="btn danger" id="gDisconnect">연결 해제</button>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" id="dlgCancel">닫기</button>
+      <button class="btn primary" id="dlgSave">저장</button>
+    </div>
+  </div>
+</dialog>
+<div id="toast" role="status"></div>
+
+<script>
+/* ---------- 저장소 ---------- */
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d }catch(e){ return d } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){ toast('기기 저장 공간이 부족해요') } }
+};
+let settings = LS.get('settings', { apiKey:'', model:'', models:[], system:'', clientId:'' });
+let convs = LS.get('convs', {});
+let pendingDeletes = LS.get('pendingDeletes', []);
+let currentId = LS.get('currentId', null);
+let busy = false, abortCtl = null;
+
+const $ = id => document.getElementById(id);
+const saveConvs = () => LS.set('convs', convs);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+function toast(t){
+  const el = $('toast'); el.textContent = t; el.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+/* ---------- 마크다운 ---------- */
+function esc(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+function md(text){
+  if (window.marked && window.DOMPurify){
+    return DOMPurify.sanitize(marked.parse(text, { breaks:true, gfm:true }));
+  }
+  return '<p>' + esc(text).replace(/\n/g,'<br>') + '</p>';
+}
+
+/* ---------- 화면 그리기 ---------- */
+const ICON_SEND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+const ICON_STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+function sortedConvs(){ return Object.values(convs).sort((a,b) => b.updated - a.updated) }
+
+function renderList(){
+  const list = $('list'); list.innerHTML = '';
+  for (const c of sortedConvs()){
+    const b = document.createElement('div');
+    b.className = 'item' + (c.id === currentId ? ' active' : '');
+    b.setAttribute('role','button'); b.tabIndex = 0;
+    b.innerHTML = '<span></span><button class="del" aria-label="삭제">×</button>';
+    b.querySelector('span').textContent = c.title || '새 대화';
+    b.onclick = e => {
+      if (e.target.classList.contains('del')){ e.stopPropagation(); removeConv(c.id); return }
+      openConv(c.id); $('app').classList.remove('open');
+    };
+    b.onkeydown = e => { if (e.key === 'Enter') b.click() };
+    list.appendChild(b);
+  }
+}
+
+function renderMsgs(){
+  const col = $('col'); col.innerHTML = '';
+  const c = convs[currentId];
+  $('title').textContent = c ? (c.title || '새 대화') : '새 대화';
+  if (!c || !c.messages.length){
+    const needKey = !settings.apiKey;
+    col.innerHTML = `<div class="empty">
+      <p class="big">${needKey ? '먼저 API 키를 넣어 주세요' : '무엇이든 물어보세요'}</p>
+      <p>${needKey ? '설정에서 OpenAI API 키와 모델을 고르면 바로 대화할 수 있어요.' : (settings.model ? '지금 모델: ' + esc(settings.model) : '설정에서 모델을 골라 주세요.')}</p>
+      ${needKey || !settings.model ? '<button class="btn primary" onclick="openSettings()">설정 열기</button>' : ''}
+    </div>`;
+    return;
+  }
+  for (const m of c.messages) col.appendChild(msgEl(m));
+  scrollDown(true);
+}
+
+function msgEl(m){
+  const d = document.createElement('div');
+  d.className = 'msg ' + m.role;
+  const body = document.createElement('div'); body.className = 'body';
+  if (m.role === 'user') body.textContent = m.content; else body.innerHTML = md(m.content);
+  d.appendChild(body);
+  if (m.role === 'assistant'){
+    const t = document.createElement('div'); t.className = 'msg-tools';
+    const cp = document.createElement('button'); cp.textContent = '복사';
+    cp.onclick = () => navigator.clipboard.writeText(m.content).then(() => toast('복사했어요'));
+    t.appendChild(cp); d.appendChild(t);
+  }
+  return d;
+}
+
+function scrollDown(force){
+  const box = $('msgs');
+  if (force || box.scrollHeight - box.scrollTop - box.clientHeight < 140) box.scrollTop = box.scrollHeight;
+}
+
+function updateSendBtn(){
+  const btn = $('sendBtn');
+  if (busy){ btn.innerHTML = ICON_STOP; btn.disabled = false; btn.setAttribute('aria-label','멈추기') }
+  else { btn.innerHTML = ICON_SEND; btn.disabled = !$('input').value.trim(); btn.setAttribute('aria-label','보내기') }
+}
+
+/* ---------- 대화 관리 ---------- */
+function newConv(){
+  currentId = null; LS.set('currentId', null);
+  renderList(); renderMsgs(); $('input').focus(); $('app').classList.remove('open');
+}
+function openConv(id){ currentId = id; LS.set('currentId', id); renderList(); renderMsgs() }
+function removeConv(id){
+  const c = convs[id]; if (!c) return;
+  if (!confirm(`"${c.title || '새 대화'}" 대화를 삭제할까요?`)) return;
+  if (c.driveId){ pendingDeletes.push(c.driveId); LS.set('pendingDeletes', pendingDeletes) }
+  delete convs[id]; saveConvs();
+  if (currentId === id){ currentId = null; LS.set('currentId', null) }
+  renderList(); renderMsgs(); queueSync();
+}
+
+/* ---------- OpenAI 호출 ---------- */
+async function send(){
+  if (busy){ abortCtl && abortCtl.abort(); return }
+  const text = $('input').value.trim();
+  if (!text) return;
+  if (!settings.apiKey || !settings.model){ openSettings(); toast('API 키와 모델을 먼저 설정해 주세요'); return }
+
+  let c = convs[currentId];
+  if (!c){
+    c = { id: uid(), title: text.slice(0, 30), created: Date.now(), updated: Date.now(), messages: [] };
+    convs[c.id] = c; currentId = c.id; LS.set('currentId', c.id);
+  }
+  c.messages.push({ role:'user', content:text });
+  c.updated = Date.now(); saveConvs();
+  $('input').value = ''; autoGrow();
+  renderList(); renderMsgs();
+
+  const reply = { role:'assistant', content:'' };
+  const el = msgEl(reply); const body = el.querySelector('.body');
+  body.classList.add('cursor'); $('col').appendChild(el); scrollDown(true);
+
+  busy = true; updateSendBtn(); abortCtl = new AbortController();
+  const payload = [];
+  if (settings.system.trim()) payload.push({ role:'system', content: settings.system.trim() });
+  for (const m of c.messages) payload.push({ role:m.role, content:m.content });
+
+  let pending = false;
+  const paint = () => { if (pending) return; pending = true; requestAnimationFrame(() => { body.innerHTML = md(reply.content); pending = false; scrollDown() }) };
+
+  try{
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
+      body: JSON.stringify({ model: settings.model, messages: payload, stream: true }),
+      signal: abortCtl.signal
+    });
+    if (!res.ok){
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error?.message || ('요청 실패 (' + res.status + ')'));
+    }
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    while (true){
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines){
+        const l = line.trim(); if (!l.startsWith('data:')) continue;
+        const data = l.slice(5).trim(); if (data === '[DONE]') continue;
+        try{ const d = JSON.parse(data).choices?.[0]?.delta?.content; if (d){ reply.content += d; paint() } }catch(e){}
+      }
+    }
+  }catch(err){
+    if (err.name !== 'AbortError'){
+      if (!reply.content){
+        c.messages.pop(); el.remove();
+        $('col').lastElementChild?.remove();
+        $('input').value = text; autoGrow();
+        if (!c.messages.length){ delete convs[c.id]; currentId = null; LS.set('currentId', null) }
+        saveConvs(); renderList(); if (!currentId) renderMsgs();
+      }
+      toast(err.message);
+    }
+  }finally{
+    busy = false; abortCtl = null; body.classList.remove('cursor');
+    if (reply.content){
+      body.innerHTML = md(reply.content);
+      c.messages.push(reply); c.updated = Date.now(); saveConvs(); renderList(); queueSync();
+    } else if (convs[c.id] && c.messages.at(-1)?.role === 'user' && el.isConnected){
+      el.remove();
+    }
+    updateSendBtn();
+  }
+}
+
+async function loadModels(){
+  const key = $('sKey').value.trim();
+  if (!key){ toast('API 키를 먼저 입력해 주세요'); return }
+  try{
+    const r = await fetch('https://api.openai.com/v1/models', { headers:{ Authorization:'Bearer ' + key } });
+    if (!r.ok) throw new Error('키를 확인해 주세요 (' + r.status + ')');
+    const j = await r.json();
+    const skip = /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|davinci|babbage|search|computer-use/i;
+    const ids = j.data.map(m => m.id).filter(id => /^(gpt|o\d|chatgpt)/i.test(id) && !skip.test(id)).sort().reverse();
+    settings.models = ids; fillModels(ids, $('sModel').value || settings.model);
+    toast(ids.length + '개 모델을 불러왔어요');
+  }catch(e){ toast(e.message) }
+}
+function fillModels(ids, sel){
+  const s = $('sModel'); s.innerHTML = '';
+  if (!ids.length){ s.innerHTML = '<option value="">목록을 먼저 불러와 주세요</option>'; return }
+  for (const id of ids){ const o = document.createElement('option'); o.value = o.textContent = id; s.appendChild(o) }
+  if (sel && ids.includes(sel)) s.value = sel;
+}
+
+/* ---------- 구글 드라이브 동기화 ---------- */
+const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+let tokenClient = null, syncing = false, syncTimer = null;
+
+function initGoogle(){
+  if (!window.google?.accounts?.oauth2 || !settings.clientId){ setSync(); return }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: settings.clientId, scope: SCOPE,
+    callback: r => {
+      if (r.error){ toast('구글 연결에 실패했어요'); setSync(); return }
+      LS.set('gtoken', { access: r.access_token, exp: Date.now() + (r.expires_in - 60) * 1000 });
+      LS.set('gconnected', true); toast('구글 드라이브에 연결했어요'); sync();
+    }
+  });
+  setSync();
+  if (validToken()) sync();
+}
+function validToken(){ const t = LS.get('gtoken', null); return t && t.exp > Date.now() ? t.access : null }
+function connectGoogle(){
+  if (!settings.clientId){ toast('구글 클라이언트 ID를 먼저 저장해 주세요'); return }
+  if (!tokenClient) initGoogle();
+  if (!tokenClient){ toast('구글 로그인을 불러오지 못했어요. 새로고침해 주세요'); return }
+  tokenClient.requestAccessToken({ prompt: LS.get('gconnected', false) ? '' : 'consent' });
+}
+function disconnectGoogle(){
+  const t = validToken();
+  if (t && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(t, () => {});
+  LS.set('gtoken', null); LS.set('gconnected', false);
+  for (const c of Object.values(convs)) delete c.driveId;
+  saveConvs(); setSync(); toast('연결을 해제했어요');
+}
+
+function setSync(state){
+  const dot = $('syncDot'), txt = $('syncText');
+  dot.className = 'dot';
+  if (state === 'busy'){ dot.classList.add('busy'); txt.textContent = '동기화하는 중'; return }
+  if (state === 'error'){ dot.classList.add('warn'); txt.textContent = '동기화 실패, 눌러서 다시 시도'; return }
+  if (!LS.get('gconnected', false)){ txt.textContent = '동기화 꺼짐'; return }
+  if (!validToken()){ dot.classList.add('warn'); txt.textContent = '눌러서 다시 연결'; return }
+  dot.classList.add('ok');
+  const at = LS.get('lastSync', 0);
+  txt.textContent = at ? '동기화됨 ' + new Date(at).toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' }) : '동기화됨';
+}
+
+async function gfetch(url, opts = {}){
+  const t = validToken(); if (!t) throw new Error('NOAUTH');
+  const r = await fetch(url, { ...opts, headers:{ ...(opts.headers || {}), Authorization:'Bearer ' + t } });
+  if (r.status === 401){ LS.set('gtoken', null); throw new Error('NOAUTH') }
+  if (!r.ok && r.status !== 404) throw new Error('Drive ' + r.status);
+  return r;
+}
+async function listRemote(){
+  const out = []; let page = '';
+  do{
+    const u = 'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&pageSize=1000&fields=nextPageToken,files(id,name,appProperties)' + (page ? '&pageToken=' + page : '');
+    const j = await (await gfetch(u)).json();
+    out.push(...(j.files || [])); page = j.nextPageToken || '';
+  } while (page);
+  return out;
+}
+async function upload(c){
+  const meta = { name: 'conv-' + c.id + '.json', appProperties: { updated: String(c.updated) } };
+  if (!c.driveId) meta.parents = ['appDataFolder'];
+  const data = { ...c }; delete data.driveId;
+  const b = 'b' + Math.random().toString(36).slice(2);
+  const body = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(data)}\r\n--${b}--`;
+  const url = c.driveId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${c.driveId}?uploadType=multipart&fields=id`
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id';
+  const r = await gfetch(url, { method: c.driveId ? 'PATCH' : 'POST', headers:{ 'Content-Type': 'multipart/related; boundary=' + b }, body });
+  const j = await r.json(); c.driveId = j.id;
+}
+async function download(fileId){
+  return (await gfetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`)).json();
+}
+
+async function sync(){
+  if (syncing || !validToken()){ setSync(); return }
+  syncing = true; setSync('busy');
+  try{
+    while (pendingDeletes.length){
+      await gfetch('https://www.googleapis.com/drive/v3/files/' + pendingDeletes[0], { method:'DELETE' });
+      pendingDeletes.shift(); LS.set('pendingDeletes', pendingDeletes);
+    }
+    const remote = {};
+    for (const f of await listRemote()){
+      const m = f.name.match(/^conv-(.+)\.json$/); if (!m) continue;
+      remote[m[1]] = { fileId: f.id, updated: Number(f.appProperties?.updated || 0) };
+    }
+    for (const [id, r] of Object.entries(remote)){
+      const local = convs[id];
+      if (!local || r.updated > local.updated){
+        if (local && id === currentId && busy) continue;
+        const data = await download(r.fileId); data.driveId = r.fileId; convs[id] = data;
+      } else if (local.updated > r.updated){
+        local.driveId = r.fileId; await upload(local);
+      } else local.driveId = r.fileId;
+    }
+    for (const c of Object.values(convs)){
+      if (remote[c.id]) continue;
+      if (c.driveId){ delete convs[c.id]; if (currentId === c.id){ currentId = null; LS.set('currentId', null) } }
+      else await upload(c);
+    }
+    saveConvs(); LS.set('lastSync', Date.now());
+    renderList(); if (!busy) renderMsgs();
+    setSync();
+  }catch(e){
+    setSync(e.message === 'NOAUTH' ? undefined : 'error');
+  }finally{ syncing = false }
+}
+function queueSync(){ clearTimeout(syncTimer); syncTimer = setTimeout(sync, 1200) }
+
+/* ---------- 설정 ---------- */
+function openSettings(){
+  $('sKey').value = settings.apiKey; $('sSystem').value = settings.system; $('sClient').value = settings.clientId;
+  fillModels(settings.models || [], settings.model);
+  $('dlg').showModal();
+}
+function saveSettings(){
+  const clientChanged = settings.clientId !== $('sClient').value.trim();
+  settings.apiKey = $('sKey').value.trim();
+  settings.model = $('sModel').value || settings.model;
+  settings.system = $('sSystem').value;
+  settings.clientId = $('sClient').value.trim();
+  LS.set('settings', settings);
+  if (clientChanged){ tokenClient = null; initGoogle() }
+  $('dlg').close(); renderMsgs(); toast('저장했어요');
+}
+
+/* ---------- 입력창 ---------- */
+function autoGrow(){ const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; updateSendBtn() }
+$('input').addEventListener('input', autoGrow);
+$('input').addEventListener('keydown', e => {
+  const touch = matchMedia('(pointer:coarse)').matches;
+  if (e.key === 'Enter' && !e.shiftKey && !touch && !e.isComposing){ e.preventDefault(); send() }
+});
+$('sendBtn').onclick = send;
+$('newBtn').onclick = newConv;
+$('setBtn').onclick = openSettings;
+$('menuBtn').onclick = () => $('app').classList.add('open');
+$('scrim').onclick = () => $('app').classList.remove('open');
+$('syncBtn').onclick = () => { if (!LS.get('gconnected', false)) openSettings(); else if (!validToken()) connectGoogle(); else sync() };
+$('dlgSave').onclick = saveSettings;
+$('dlgCancel').onclick = () => $('dlg').close();
+$('loadModels').onclick = loadModels;
+$('gConnect').onclick = () => {
+  const id = $('sClient').value.trim();
+  if (id && id !== settings.clientId){ settings.clientId = id; LS.set('settings', settings); tokenClient = null; initGoogle() }
+  connectGoogle();
+};
+$('gDisconnect').onclick = disconnectGoogle;
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { setSync(); if (validToken()) sync() } });
+
+if (currentId && !convs[currentId]) currentId = null;
+renderList(); renderMsgs(); updateSendBtn(); setSync();
+if (window.google?.accounts?.oauth2) initGoogle();
+</script>
+</body>
+</html>
