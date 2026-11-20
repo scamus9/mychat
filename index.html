@@ -673,8 +673,9 @@ function activeTools(){
   return t;
 }
 
-async function buildInput(c, withCalls){
+async function buildInput(c){
   const input = [];
+  let carry = [];   // 앞 답변에서 만든 이미지를 다음 질문에 같이 붙여서 고쳐 그릴 수 있게 함
   // 최근에 만든 이미지 2장까지는 다음 요청에 같이 넘겨서 "이거 고쳐줘"가 되게 함
   const recent = new Set();
   outer: for (let i = c.messages.length - 1; i >= 0; i--){
@@ -684,17 +685,19 @@ async function buildInput(c, withCalls){
     if (m.role === 'assistant'){
       let t = m.content || '';
       for (const a of (m.atts || [])) if (a.generated){
-        const v = withCalls && a.callId && recent.has(a.id) ? await getAtt(a.id) : null;
-        if (v) input.push({ type:'image_generation_call', id: a.callId, status:'completed', result: v.data.split(',')[1] });
-        else t += `\n\n[이 답변에서 이미지를 만들어 보여줌: ${a.prompt || ''}]`;
+        t += `\n\n[이 답변에서 이미지를 만들어 보여줌${a.prompt ? ': ' + a.prompt : ''}]`;
+        const v = recent.has(a.id) ? await getAtt(a.id) : null;
+        if (v) carry.push({ type:'input_image', image_url: v.data });
       }
       input.push({ role:'assistant', content: t.trim() || '(이미지를 보여줌)' });
       continue;
     }
-    if (!m.atts?.length){ input.push({ role:'user', content: m.content }); continue }
+    const prev = carry; carry = [];
+    if (!m.atts?.length && !prev.length){ input.push({ role:'user', content: m.content }); continue }
     let text = m.content || '';
-    const parts = [];
-    for (const a of m.atts){
+    const parts = [...prev];
+    if (prev.length) text = (text ? text + '\n\n' : '') + '(참고: 함께 붙인 이미지는 바로 앞에서 네가 만든 이미지야. 고쳐 달라는 요청이면 이걸 바탕으로 수정해.)';
+    for (const a of (m.atts || [])){
       const v = await getAtt(a.id);
       if (!v){ text += `\n\n[첨부 파일 ${a.name}을 불러오지 못했어요]`; continue }
       if (a.kind === 'image') parts.push({ type:'input_image', image_url: v.data });
@@ -707,12 +710,12 @@ async function buildInput(c, withCalls){
 }
 
 async function streamResponse(c, h){
-  let tools = activeTools(), withCalls = true;
+  let tools = activeTools();
   for (let attempt = 0; attempt < 4; attempt++){
     const sys = [ (c.system || '').trim(),
       tools.some(t => t.type === 'image_generation') ? HINT_IMG : '',
       tools.some(t => t.type === 'web_search') ? HINT_WEB : '' ].filter(Boolean).join('\n\n');
-    const body = { model: settings.model, input: await buildInput(c, withCalls), stream: true, store: false };
+    const body = { model: settings.model, input: await buildInput(c), stream: true, store: false };
     if (sys) body.instructions = sys;
     if (tools.length) body.tools = tools;
     const res = await fetch('https://api.openai.com/v1/responses', {
@@ -722,8 +725,7 @@ async function streamResponse(c, h){
     if (!res.ok){
       const j = await res.json().catch(() => ({}));
       const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
-      if (res.status === 400){
-        if (withCalls && /image_generation_call|ig_/i.test(msg)){ withCalls = false; continue }
+      if (res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429){
         const im = tools.find(t => t.model);
         if (im && /model/i.test(msg)){ delete im.model; toast('고른 이미지 모델을 쓸 수 없어서 자동으로 골랐어요'); continue }
         if (tools.length && /tool|web_search|image_generation/i.test(msg)){
