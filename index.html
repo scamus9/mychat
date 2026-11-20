@@ -880,7 +880,8 @@ function fillModels(ids, sel){
 
 function fillImageModels(ids, sel){
   const s = $('sImgModel'); s.innerHTML = '';
-  const list = ids.length ? ids : ['gpt-image-1'];
+  const known = ['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini'];
+  const list = [...new Set([...known, ...ids])];
   for (const id of list){ const o = document.createElement('option'); o.value = o.textContent = id; s.appendChild(o) }
   s.value = list.includes(sel) ? sel : list[0];
 }
