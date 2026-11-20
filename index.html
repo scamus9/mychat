@@ -273,10 +273,11 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
       <div class="hint">키를 입력한 뒤 목록 불러오기를 누르면 쓸 수 있는 모델이 나와요.</div>
     </div>
     <div class="field">
-      <label>이미지 생성</label>
-      <label class="check"><input type="checkbox" id="sImg"> 채팅에서 그려 달라고 하면 이미지 만들기</label>
-      <select id="sImgModel"></select>
-      <div class="hint">이미지 분석은 고른 채팅 모델이 하고, 그림은 여기서 고른 이미지 모델이 그려요.</div>
+      <label>도구</label>
+      <label class="check"><input type="checkbox" id="sWeb"> 필요할 때 웹에서 찾아보고 답하기</label>
+      <label class="check"><input type="checkbox" id="sImg"> 그려 달라고 하면 이미지 만들기</label>
+      <select id="sImgModel" aria-label="이미지 모델"></select>
+      <div class="hint">이미지 모델은 자동으로 두면 알아서 골라요. 웹 검색과 이미지 생성은 쓸 때마다 요금이 조금 더 들어요.</div>
     </div>
     <div class="field">
       <label>지시문</label>
@@ -362,7 +363,8 @@ const LS = {
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 let settings = LS.get('settings', { apiKey:'', model:'', models:[], clientId:'' });
 if (settings.imageGen === undefined) settings.imageGen = true;
-if (!settings.imageModel) settings.imageModel = 'gpt-image-1';
+if (!settings.imageModel) settings.imageModel = 'auto';
+if (!settings.v2){ settings.v2 = true; settings.imageModel = 'auto'; settings.webSearch = true; try{ localStorage.setItem('settings', JSON.stringify(settings)) }catch(e){} }
 if (!settings.imageModels) settings.imageModels = [];
 let pendingAttDeletes = LS.get('pendingAttDeletes', []);
 let pending = [];           // 첨부 대기 중인 파일
@@ -656,115 +658,115 @@ function removeConv(id){
   renderList(); renderMsgs(); queueSync();
 }
 
-/* ---------- OpenAI 호출 ---------- */
-const IMG_TOOL = { type:'function', function:{
-  name:'generate_image',
-  description:'사용자가 그림, 이미지, 일러스트, 사진, 로고, 포스터, 썸네일 등을 만들어 달라고 하거나 앞선 이미지를 고쳐 달라고 할 때만 호출한다. 대화 맥락을 반영해 prompt를 영어로 자세하게 쓰고, 이미지 안에 들어갈 글자는 사용자가 정한 원문 그대로 따옴표 안에 넣는다. 호출이 끝나면 이미지는 이미 사용자에게 보이므로 짧게 설명만 덧붙인다.',
-  parameters:{ type:'object', properties:{
-    prompt:{ type:'string', description:'이미지 생성용 상세 프롬프트' },
-    size:{ type:'string', enum:['1024x1024','1536x1024','1024x1536'], description:'정사각형, 가로형, 세로형 중 선택' },
-    edit_last_image:{ type:'boolean', description:'대화에서 가장 최근 이미지(사용자가 올린 사진 포함)를 바탕으로 고칠 때 true' }
-  }, required:['prompt'] }
-}};
+/* ---------- OpenAI 호출 (Responses API) ---------- */
+const HINT_IMG = '이 앱에서 너는 image_generation 도구로 실제 이미지를 만들어 보여줄 수 있으니, 이미지를 만들 수 없다고 말하지 마라. 사용자가 그림, 사진, 일러스트, 포스터 같은 이미지 결과물을 원할 때만 쓰고, "그려줘"가 글로 묘사해 달라는 뜻이거나 표, 도표, 순서도, 그래프처럼 글이나 마크다운으로 답하는 게 맞으면 글로 답해라. 정말 애매하면 짧게 물어봐라. 이미지를 만든 뒤에는 이미지를 길게 다시 묘사하지 말고 짧게 덧붙여라.';
+const HINT_WEB = '최신 정보, 뉴스, 가격, 일정처럼 바뀔 수 있는 내용이나 확인이 필요한 사실은 web_search 도구로 찾아보고 답해라.';
 
-async function buildPayload(c){
-  const out = [];
-  if ((c.system || '').trim()) out.push({ role:'system', content: c.system.trim() });
+function activeTools(){
+  const t = [];
+  if (settings.webSearch) t.push({ type:'web_search' });
+  if (settings.imageGen){
+    const it = { type:'image_generation', partial_images: 2 };
+    if (settings.imageModel && settings.imageModel !== 'auto') it.model = settings.imageModel;
+    t.push(it);
+  }
+  return t;
+}
+
+async function buildInput(c, withCalls){
+  const input = [];
+  // 최근에 만든 이미지 2장까지는 다음 요청에 같이 넘겨서 "이거 고쳐줘"가 되게 함
+  const recent = new Set();
+  outer: for (let i = c.messages.length - 1; i >= 0; i--){
+    for (const a of [...(c.messages[i].atts || [])].reverse()) if (a.generated){ recent.add(a.id); if (recent.size >= 2) break outer }
+  }
   for (const m of c.messages){
     if (m.role === 'assistant'){
       let t = m.content || '';
-      for (const a of (m.atts || [])) if (a.generated) t += `\n\n[이 답변에서 이미지를 생성해 보여줌: ${a.prompt || ''}]`;
-      out.push({ role:'assistant', content: t || '(이미지만 보여줌)' });
+      for (const a of (m.atts || [])) if (a.generated){
+        const v = withCalls && a.callId && recent.has(a.id) ? await getAtt(a.id) : null;
+        if (v) input.push({ type:'image_generation_call', id: a.callId, status:'completed', result: v.data.split(',')[1] });
+        else t += `\n\n[이 답변에서 이미지를 만들어 보여줌: ${a.prompt || ''}]`;
+      }
+      input.push({ role:'assistant', content: t.trim() || '(이미지를 보여줌)' });
       continue;
     }
-    if (!m.atts?.length){ out.push({ role:'user', content: m.content }); continue }
+    if (!m.atts?.length){ input.push({ role:'user', content: m.content }); continue }
     let text = m.content || '';
     const parts = [];
     for (const a of m.atts){
       const v = await getAtt(a.id);
       if (!v){ text += `\n\n[첨부 파일 ${a.name}을 불러오지 못했어요]`; continue }
-      if (a.kind === 'image') parts.push({ type:'image_url', image_url:{ url: v.data } });
-      else if (a.kind === 'pdf') parts.push({ type:'file', file:{ filename: a.name, file_data: v.data } });
+      if (a.kind === 'image') parts.push({ type:'input_image', image_url: v.data });
+      else if (a.kind === 'pdf') parts.push({ type:'input_file', filename: a.name, file_data: v.data });
       else text += `\n\n[첨부 파일: ${a.name}]\n\`\`\`\n${v.data}\n\`\`\``;
     }
-    out.push({ role:'user', content: [{ type:'text', text: text || '첨부한 파일을 확인해 줘.' }, ...parts] });
+    input.push({ role:'user', content: [{ type:'input_text', text: text || '첨부한 파일을 확인해 줘.' }, ...parts] });
   }
-  return out;
+  return input;
 }
 
-async function streamChat(messages, useTools, onText){
-  const body = { model: settings.model, messages, stream: true };
-  if (useTools) body.tools = [IMG_TOOL];
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
-    body: JSON.stringify(body), signal: abortCtl.signal
-  });
-  if (!res.ok){
-    const j = await res.json().catch(() => ({}));
-    const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
-    if (useTools && res.status === 400 && /tool|function/i.test(msg)) return streamChat(messages, false, onText);
-    throw new Error(msg);
+async function streamResponse(c, h){
+  let tools = activeTools(), withCalls = true;
+  for (let attempt = 0; attempt < 4; attempt++){
+    const sys = [ (c.system || '').trim(),
+      tools.some(t => t.type === 'image_generation') ? HINT_IMG : '',
+      tools.some(t => t.type === 'web_search') ? HINT_WEB : '' ].filter(Boolean).join('\n\n');
+    const body = { model: settings.model, input: await buildInput(c, withCalls), stream: true, store: false };
+    if (sys) body.instructions = sys;
+    if (tools.length) body.tools = tools;
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
+      body: JSON.stringify(body), signal: abortCtl.signal
+    });
+    if (!res.ok){
+      const j = await res.json().catch(() => ({}));
+      const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
+      if (res.status === 400){
+        if (withCalls && /image_generation_call|ig_/i.test(msg)){ withCalls = false; continue }
+        const im = tools.find(t => t.model);
+        if (im && /model/i.test(msg)){ delete im.model; toast('고른 이미지 모델을 쓸 수 없어서 자동으로 골랐어요'); continue }
+        if (tools.length && /tool|web_search|image_generation/i.test(msg)){
+          tools = []; toast('지금 채팅 모델은 웹 검색이나 이미지 생성을 지원하지 않아요. 설정에서 gpt-5 계열로 바꿔 주세요'); continue;
+        }
+      }
+      throw new Error(msg);
+    }
+    await readSSE(res, h);
+    return;
   }
-  const reader = res.body.getReader(); const dec = new TextDecoder();
-  let buf = '', text = ''; const calls = [];
+  throw new Error('요청을 보내지 못했어요');
+}
+
+async function readSSE(res, h){
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
   while (true){
     const { value, done } = await reader.read(); if (done) break;
     buf += dec.decode(value, { stream:true });
     const lines = buf.split('\n'); buf = lines.pop();
     for (const line of lines){
       const l = line.trim(); if (!l.startsWith('data:')) continue;
-      const data = l.slice(5).trim(); if (data === '[DONE]') continue;
-      let delta; try{ delta = JSON.parse(data).choices?.[0]?.delta }catch(e){ continue }
-      if (!delta) continue;
-      if (delta.content){ text += delta.content; onText(delta.content) }
-      for (const tc of (delta.tool_calls || [])){
-        const k = calls[tc.index] || (calls[tc.index] = { id:'', name:'', args:'' });
-        if (tc.id) k.id = tc.id;
-        if (tc.function?.name) k.name += tc.function.name;
-        if (tc.function?.arguments) k.args += tc.function.arguments;
+      let ev; try{ ev = JSON.parse(l.slice(5).trim()) }catch(e){ continue }
+      switch (ev.type){
+        case 'response.output_item.added':
+          if (ev.item?.type === 'message') h.msgStart();
+          else if (ev.item?.type === 'image_generation_call') h.imgStart(ev.item.id);
+          else if (ev.item?.type === 'web_search_call') h.search(true);
+          break;
+        case 'response.output_text.delta': h.text(ev.delta || ''); break;
+        case 'response.output_text.annotation.added': h.annot(ev.annotation); break;
+        case 'response.image_generation_call.partial_image': h.imgPartial(ev.item_id, ev.partial_image_b64); break;
+        case 'response.output_item.done':
+          if (ev.item?.type === 'image_generation_call') h.imgDone(ev.item);
+          else if (ev.item?.type === 'web_search_call') h.search(false);
+          else if (ev.item?.type === 'message') for (const p of (ev.item.content || [])) for (const a of (p.annotations || [])) h.annot(a);
+          break;
+        case 'response.incomplete': toast('답변이 길어서 중간에 끊겼어요'); break;
+        case 'response.failed': throw new Error(ev.response?.error?.message || '답변을 만들지 못했어요');
+        case 'error': throw new Error(ev.message || ev.error?.message || '오류가 났어요');
       }
     }
   }
-  return { text, calls: calls.filter(Boolean) };
-}
-
-function lastImageId(c, reply){
-  for (const a of [...(reply.atts || [])].reverse()) if (a.kind === 'image') return a.id;
-  for (const m of [...c.messages].reverse()) for (const a of [...(m.atts || [])].reverse()) if (a.kind === 'image') return a.id;
-  return null;
-}
-
-async function generateImage(args, c, reply){
-  const model = settings.imageModel || 'gpt-image-1';
-  const isDalle = model.startsWith('dall-e');
-  let size = args.size || '1024x1024';
-  if (isDalle && size !== '1024x1024') size = size === '1536x1024' ? '1792x1024' : '1024x1792';
-  let res;
-  if (args.edit_last_image){
-    const lid = lastImageId(c, reply); const src = lid && await getAtt(lid);
-    if (!src) throw new Error('고칠 이미지를 찾지 못했어요');
-    const blob = await (await fetch(src.data)).blob();
-    const fd = new FormData();
-    fd.append('model', model); fd.append('prompt', args.prompt);
-    fd.append('image', blob, 'image.' + ((blob.type.split('/')[1]) || 'png'));
-    if (!isDalle) fd.append('size', size); else fd.append('response_format', 'b64_json');
-    res = await fetch('https://api.openai.com/v1/images/edits', { method:'POST', headers:{ Authorization:'Bearer ' + settings.apiKey }, body: fd, signal: abortCtl.signal });
-  } else {
-    const body = { model, prompt: args.prompt, size, n: 1 };
-    if (isDalle) body.response_format = 'b64_json';
-    res = await fetch('https://api.openai.com/v1/images/generations', {
-      method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + settings.apiKey },
-      body: JSON.stringify(body), signal: abortCtl.signal
-    });
-  }
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error?.message || ('이미지 생성 실패 (' + res.status + ')'));
-  const b64 = j.data?.[0]?.b64_json;
-  if (!b64) throw new Error('이미지를 받지 못했어요');
-  const id = uid(), data = 'data:image/png;base64,' + b64;
-  const v = { kind:'image', mime:'image/png', name:`image-${id}.png`, data };
-  await idb.put(id, v); attCache.set(id, v);
-  return { id, kind:'image', mime:'image/png', name:'생성한 이미지.png', prompt: args.prompt, generated: true };
 }
 
 async function send(){
@@ -799,35 +801,47 @@ async function send(){
   const paint = () => { if (pendingPaint) return; pendingPaint = true; requestAnimationFrame(() => { body.innerHTML = md(reply.content); pendingPaint = false; scrollDown() }) };
   const onText = t => { reply.content += t; paint() };
 
-  try{
-    const apiMsgs = await buildPayload(c);
-    const useTools = !!settings.imageGen;
-    let r = await streamChat(apiMsgs, useTools, onText);
-    for (let round = 0; round < 3 && r.calls.length; round++){
-      apiMsgs.push({ role:'assistant', content: r.text || null,
-        tool_calls: r.calls.map(t => ({ id:t.id, type:'function', function:{ name:t.name, arguments:t.args || '{}' } })) });
-      for (const t of r.calls){
-        let result;
-        if (t.name !== 'generate_image'){ result = '알 수 없는 도구예요.' }
-        else {
-          const st = document.createElement('div'); st.className = 'gen-status'; st.textContent = '이미지를 그리는 중이에요. 30초쯤 걸릴 수 있어요';
-          el.insertBefore(st, el.querySelector('.msg-tools')); scrollDown(true);
-          try{
-            let args = {}; try{ args = JSON.parse(t.args || '{}') }catch(e){}
-            if (!args.prompt) throw new Error('그릴 내용을 알 수 없어요');
-            const meta = await generateImage(args, c, reply);
-            reply.atts.push(meta); genBox.hidden = false; genBox.appendChild(attEl(meta));
-            result = '이미지를 생성해서 사용자에게 이미 보여줬어요. 이미지를 다시 묘사하지 말고 한두 문장으로만 덧붙이세요.';
-          }catch(e){
-            if (e.name === 'AbortError') throw e;
-            result = '이미지 생성 실패: ' + e.message + ' 사용자에게 이유를 쉽게 알려 주세요.';
-          }finally{ st.remove() }
-        }
-        apiMsgs.push({ role:'tool', tool_call_id: t.id, content: result });
-      }
-      if (reply.content) onText('\n\n');
-      r = await streamChat(apiMsgs, useTools, onText);
+  const imgs = {}; const sources = new Map(); let searchEl = null;
+  const status = t => { const st = document.createElement('div'); st.className = 'gen-status'; st.textContent = t; el.insertBefore(st, el.querySelector('.msg-tools')); scrollDown(true); return st };
+  const h = {
+    msgStart(){ if (reply.content && !reply.content.endsWith('\n\n')) onText('\n\n') },
+    text: onText,
+    annot(a){ if (a && a.type === 'url_citation' && a.url && !sources.has(a.url)) sources.set(a.url, a.title || a.url) },
+    search(on){
+      if (on){ if (!searchEl) searchEl = status('웹에서 찾아보는 중이에요') }
+      else if (searchEl){ searchEl.remove(); searchEl = null }
+    },
+    imgStart(id){
+      if (imgs[id]) return;
+      const st = status('이미지를 그리는 중이에요. 30초쯤 걸릴 수 있어요');
+      const b = document.createElement('div'); b.className = 'att-img big'; b.hidden = true;
+      const im = document.createElement('img'); im.alt = '그리는 중인 이미지'; b.appendChild(im);
+      genBox.hidden = false; genBox.appendChild(b);
+      imgs[id] = { st, b, im };
+    },
+    imgPartial(id, b64){
+      if (!b64) return;
+      h.imgStart(id); const x = imgs[id];
+      x.im.src = 'data:image/png;base64,' + b64; x.b.hidden = false; scrollDown();
+    },
+    imgDone(item){
+      const x = imgs[item.id]; if (x) x.st.remove();
+      if (!item.result){ if (x) x.b.remove(); toast('이미지를 만들지 못했어요'); return }
+      const aid = uid(), fmt = item.output_format || 'png';
+      const v = { kind:'image', mime:'image/' + fmt, name:`image-${aid}.${fmt}`, data:`data:image/${fmt};base64,` + item.result };
+      attCache.set(aid, v); idb.put(aid, v).catch(() => {});
+      const meta = { id:aid, kind:'image', mime:v.mime, name:'생성한 이미지.' + fmt, prompt: item.revised_prompt || '', generated:true, callId:item.id };
+      reply.atts.push(meta);
+      const node = attEl(meta);
+      if (x) x.b.replaceWith(node); else { genBox.hidden = false; genBox.appendChild(node) }
+      scrollDown();
     }
+  };
+
+  try{
+    await streamResponse(c, h);
+    const extra = [...sources].filter(([u]) => !reply.content.includes(u));
+    if (extra.length) onText('\n\n**출처**\n' + extra.map(([u, t]) => `- [${t.replace(/[\[\]]/g, '')}](${u})`).join('\n'));
   }catch(err){
     if (err.name !== 'AbortError'){
       if (!reply.content && !reply.atts.length){
@@ -846,6 +860,7 @@ async function send(){
   }finally{
     busy = false; abortCtl = null; body.classList.remove('cursor');
     el.querySelectorAll('.gen-status').forEach(x => x.remove());
+    genBox.querySelectorAll('div.att-img').forEach(x => { if (x.hidden || !x.querySelector('img')?.src) x.remove() });
     if (reply.content || reply.atts.length){
       reply.content = reply.content.trim();
       body.innerHTML = reply.content ? md(reply.content) : '';
@@ -881,8 +896,8 @@ function fillModels(ids, sel){
 function fillImageModels(ids, sel){
   const s = $('sImgModel'); s.innerHTML = '';
   const known = ['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini'];
-  const list = [...new Set([...known, ...ids])];
-  for (const id of list){ const o = document.createElement('option'); o.value = o.textContent = id; s.appendChild(o) }
+  const list = ['auto', ...new Set([...known, ...ids.filter(i => !i.startsWith('dall-e'))])];
+  for (const id of list){ const o = document.createElement('option'); o.value = id; o.textContent = id === 'auto' ? '이미지 모델: 자동 (추천)' : '이미지 모델: ' + id; s.appendChild(o) }
   s.value = list.includes(sel) ? sel : list[0];
 }
 
@@ -1152,6 +1167,7 @@ function openSettings(){
   fillModels(settings.models || [], settings.model);
   fillImageModels(settings.imageModels || [], settings.imageModel);
   $('sImg').checked = !!settings.imageGen;
+  $('sWeb').checked = !!settings.webSearch;
   $('dlg').showModal();
 }
 function saveSettings(){
@@ -1160,7 +1176,8 @@ function saveSettings(){
   settings.model = $('sModel').value || settings.model;
   settings.clientId = $('sClient').value.trim();
   settings.imageGen = $('sImg').checked;
-  settings.imageModel = $('sImgModel').value || 'gpt-image-1';
+  settings.imageModel = $('sImgModel').value || 'auto';
+  settings.webSearch = $('sWeb').checked;
   LS.set('settings', settings);
   if (clientChanged){ tokenClient = null; initGoogle() }
   $('dlg').close(); renderMsgs(); toast('저장했어요');
