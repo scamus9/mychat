@@ -94,6 +94,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .top{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);min-height:52px}
 .top h2{font-size:15px;font-weight:500;margin:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1}
 #menuBtn{display:none}
+#verbBtn{flex-shrink:0;max-width:none}
 .chip{
   flex-shrink:1;max-width:46%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
   border:1px solid var(--line);background:none;border-radius:999px;padding:4px 12px;
@@ -265,6 +266,7 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
     <div class="top">
       <button class="icon-btn" id="menuBtn" aria-label="대화 목록 열기">☰</button>
       <h2 id="title">새 대화</h2>
+      <button class="chip" id="verbBtn" title="답변 길이 바꾸기">보통</button>
       <button class="chip" id="instrBtn">지시문 없음</button>
     </div>
     <div id="msgs"><div class="col" id="col"></div></div>
@@ -299,6 +301,15 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
         <button class="btn" id="loadModels" style="flex:0 0 auto">목록 불러오기</button>
       </div>
       <div class="hint" id="modelHint">키를 입력한 뒤 목록 불러오기를 누르면 쓸 수 있는 모델이 나와요.</div>
+    </div>
+    <div class="field">
+      <label for="sVerb">기본 답변 길이</label>
+      <select id="sVerb">
+        <option value="low">짧게 · 핵심만</option>
+        <option value="medium">보통</option>
+        <option value="high">길게 · 자세하고 풍부하게</option>
+      </select>
+      <div class="hint">새 대화에 적용돼요. 대화 화면 위쪽 버튼으로 대화마다 바꿀 수 있어요. GPT-5 이후 모델에서 동작해요.</div>
     </div>
     <div class="field">
       <label>도구</label>
@@ -429,6 +440,7 @@ if (settings.imageGen === undefined) settings.imageGen = true;
 if (!settings.imageModel) settings.imageModel = 'auto';
 if (!settings.v2){ settings.v2 = true; settings.imageModel = 'auto'; settings.webSearch = true; try{ localStorage.setItem('settings', JSON.stringify(settings)) }catch(e){} }
 if (!settings.imageModels) settings.imageModels = [];
+if (!settings.verbosity) settings.verbosity = 'medium';
 let pendingAttDeletes = LS.get('pendingAttDeletes', []);
 let pending = [];           // 첨부 대기 중인 파일
 let remoteAtts = {};        // 드라이브에 있는 첨부파일 id -> fileId
@@ -446,6 +458,23 @@ if (settings.system && settings.system.trim() && !promptsStore.items.length){
   LS.set('prompts', promptsStore);
 }
 if ('system' in settings){ delete settings.system; LS.set('settings', settings) }
+const CREATIVE_NAME = '창작 글쓰기 (예시)';
+// 예시 지시문은 동기화가 끝난 뒤(또는 동기화를 안 쓸 때) 한 번만 넣어서 다른 기기 지시문을 덮어쓰지 않게 함
+function seedCreative(){
+  if (LS.get('seededCreative', false)) return false;
+  LS.set('seededCreative', true);
+  if (promptsStore.items.some(p => p.name === CREATIVE_NAME)) return false;
+  promptsStore.items.push({ id: uid(), name: CREATIVE_NAME, content: `너는 감각이 뛰어난 작가야. 글을 쓸 때 다음을 지켜 줘.
+- 요약하듯 설명하지 말고, 장면을 눈앞에 보여주듯 써. 소리, 냄새, 촉감, 빛 같은 감각 묘사를 넣어.
+- 짧은 문장과 긴 문장을 섞어서 리듬을 만들어. 같은 어미가 반복되지 않게 해.
+- 인물의 감정은 "슬펐다"처럼 이름 붙이지 말고 행동, 표정, 대사로 드러내.
+- 대화문은 인물마다 말투가 달라야 하고, 실제로 들릴 법하게 써.
+- 상투적인 표현과 교훈적인 마무리는 피하고, 여운이 남게 끝내.
+- 분량을 아끼지 말고 충분히 길고 풍부하게 써.` });
+  promptsStore.updated = Date.now(); LS.set('prompts', promptsStore);
+  return true;
+}
+if (!LS.get('gconnected', false)) seedCreative();
 
 const $ = id => document.getElementById(id);
 const saveConvs = () => LS.set('convs', convs);
@@ -483,11 +512,30 @@ function instrLabel(a){
   const p = findPrompt(a.promptId);
   return p && p.content === a.system ? p.name : '직접 쓴 지시문';
 }
+const VERB_LABEL = { low:'짧게', medium:'보통', high:'길게' };
+function activeVerb(){
+  const c = convs[currentId];
+  return (c ? c.verbosity : draft.verbosity) || settings.verbosity || 'medium';
+}
+function renderVerb(){
+  const v = activeVerb(), b = $('verbBtn');
+  b.textContent = VERB_LABEL[v]; b.classList.toggle('on', v !== 'medium');
+  b.setAttribute('aria-label', '답변 길이 ' + VERB_LABEL[v] + ', 눌러서 바꾸기');
+}
+$('verbBtn').onclick = () => {
+  const order = ['low', 'medium', 'high'];
+  const next = order[(order.indexOf(activeVerb()) + 1) % 3];
+  const c = convs[currentId];
+  if (c){ c.verbosity = next; c.updated = Date.now(); saveConvs(); queueSync() }
+  else draft.verbosity = next;
+  renderVerb(); toast('답변 길이: ' + VERB_LABEL[next]);
+};
 function renderChip(){
   const a = activeInstr(), b = $('instrBtn');
   b.textContent = instrLabel(a);
   b.classList.toggle('on', !!a.system.trim());
   b.title = a.system || '지시문 없음';
+  renderVerb();
 }
 
 /* ---------- 첨부파일 저장소 (IndexedDB) ---------- */
@@ -981,6 +1029,7 @@ async function buildInput(c){
 
 async function streamResponse(c, h){
   let tools = activeTools();
+  let verb = (c.verbosity || settings.verbosity || 'medium');
   for (let attempt = 0; attempt < 4; attempt++){
     const sys = [ (c.system || '').trim(),
       tools.some(t => t.type === 'image_generation') ? HINT_IMG : '',
@@ -988,6 +1037,7 @@ async function streamResponse(c, h){
     const body = { model: settings.model, input: await buildInput(c), stream: true, store: false };
     if (sys) body.instructions = sys;
     if (tools.length) body.tools = tools;
+    if (verb) body.text = { verbosity: verb };
     const res = await fetch('https://api.openai.com/v1/responses', {
       method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
       body: JSON.stringify(body), signal: abortCtl.signal
@@ -996,6 +1046,11 @@ async function streamResponse(c, h){
       const j = await res.json().catch(() => ({}));
       const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
       if (res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429){
+        if (verb && /verbosity|text\.|'text'/i.test(msg)){
+          verb = null;
+          if (!toast.verbWarned){ toast.verbWarned = true; toast('이 모델은 답변 길이 설정을 지원하지 않아서 기본 길이로 답해요') }
+          continue;
+        }
         const im = tools.find(t => t.model);
         if (im && /model/i.test(msg)){ delete im.model; toast('고른 이미지 모델을 쓸 수 없어서 자동으로 골랐어요'); continue }
         if (tools.length && /tool|web_search|image_generation/i.test(msg)){
@@ -1056,6 +1111,7 @@ async function send(){
   if (!c){
     c = { id: uid(), title: (text || metas[0]?.name || '첨부 파일').slice(0, 30), created: Date.now(), updated: Date.now(), messages: [],
           system: draft.system, promptId: draft.promptId };
+    if (draft.verbosity) c.verbosity = draft.verbosity;
     convs[c.id] = c; currentId = c.id; LS.set('currentId', c.id);
   }
   const userMsg = { role:'user', content:text };
@@ -1503,6 +1559,7 @@ async function sync(){
     } else if (promptsStore.updated){
       delete promptsStore.driveId; await uploadPrompts();
     }
+    if (seedCreative()){ delete promptsStore.driveId; promptsStore.driveId = remotePrompts?.fileId; await uploadPrompts() }
     LS.set('prompts', promptsStore);
     // 잔액 기준
     if (remoteBalance){
@@ -1545,6 +1602,7 @@ function openSettings(){
   fillImageModels(settings.imageModels || [], settings.imageModel);
   $('sImg').checked = !!settings.imageGen;
   $('sWeb').checked = !!settings.webSearch;
+  $('sVerb').value = settings.verbosity || 'medium';
   refreshPriceFields();
   $('dlg').showModal();
 }
@@ -1557,6 +1615,7 @@ function saveSettings(){
   settings.imageGen = $('sImg').checked;
   settings.imageModel = $('sImgModel').value || 'auto';
   settings.webSearch = $('sWeb').checked;
+  settings.verbosity = $('sVerb').value || 'medium';
   savePriceFields();
   LS.set('settings', settings);
   if (clientChanged){ tokenClient = null; initGoogle() }
