@@ -105,6 +105,27 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .msg-tools{margin-top:6px}
 .msg-tools button{border:0;background:none;color:var(--muted);font-size:12.5px;padding:2px 0}
 .cursor::after{content:"▍";color:var(--accent);margin-left:2px}
+.ucol{display:flex;flex-direction:column;align-items:flex-end;gap:6px;max-width:85%}
+.msg.user .ucol .body{max-width:100%}
+.atts{display:flex;flex-wrap:wrap;gap:8px}
+.msg.user .atts{justify-content:flex-end}
+.msg.assistant .atts{margin-top:12px}
+.att-img{border:1px solid var(--line);padding:0;background:var(--surface);border-radius:12px;overflow:hidden;cursor:zoom-in;display:block;min-width:80px;min-height:80px}
+.att-img img{display:block;max-width:220px;max-height:220px}
+.att-img.big img{max-width:min(420px,100%);max-height:none;width:100%}
+.att-img.big{width:min(420px,100%)}
+.att-img.missing{cursor:default;font-size:12.5px;color:var(--muted);padding:12px}
+.fchip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:7px 12px;font-size:13.5px;max-width:260px}
+.fchip span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.fchip b{font-size:11px;color:var(--accent);font-weight:600}
+.gen-status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;margin-top:10px}
+.gen-status::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1s infinite}
+.lightbox{position:fixed;inset:0;background:rgba(5,8,12,.88);z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
+.lightbox img{max-width:100%;max-height:78dvh;border-radius:8px}
+.lightbox .row{flex:0 0 auto}
+.lightbox .btn{flex:0 0 auto;text-decoration:none;color:var(--ink)}
+.check{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:400;margin-bottom:8px}
+.check input{width:auto}
 
 .empty{max-width:420px;margin:18vh auto 0;text-align:center;color:var(--muted)}
 .empty p{margin:0 0 6px}
@@ -113,11 +134,22 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 
 .composer{padding:8px 16px calc(12px + env(safe-area-inset-bottom,0px))}
 .box{
-  max-width:720px;margin:0 auto;display:flex;align-items:flex-end;gap:8px;background:var(--surface);
-  border:1px solid var(--line);border-radius:20px;padding:8px 8px 8px 16px
+  max-width:720px;margin:0 auto;background:var(--surface);
+  border:1px solid var(--line);border-radius:20px;padding:8px
 }
+.box-row{display:flex;align-items:flex-end;gap:6px}
+.tray{display:flex;flex-wrap:wrap;gap:8px;padding:4px 4px 10px}
+.tchip{position:relative;height:56px;border:1px solid var(--line);border-radius:10px;background:var(--bg);display:flex;align-items:center}
+.tchip img{width:56px;height:56px;object-fit:cover;border-radius:9px;display:block}
+.tchip .fname{padding:0 12px;font-size:13px;max-width:180px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tchip .fname b{display:block;font-size:11px;color:var(--accent);font-weight:600}
+.tchip .tx{position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;border:0;background:var(--ink);color:var(--bg);font-size:13px;line-height:22px;padding:0}
+#attachBtn{border:0;background:none;width:38px;height:38px;border-radius:50%;color:var(--muted);display:grid;place-items:center;flex-shrink:0}
+#attachBtn:hover{color:var(--ink);background:color-mix(in srgb,var(--ink) 6%,transparent)}
+#attachBtn svg{width:20px;height:20px}
+.app.dragging main{outline:2px dashed var(--accent);outline-offset:-8px}
 .box:focus-within{border-color:var(--accent)}
-#input{flex:1;border:0;background:none;resize:none;outline:none;max-height:200px;padding:6px 0;line-height:1.5}
+#input{flex:1;border:0;background:none;resize:none;outline:none;max-height:200px;padding:7px 0;line-height:1.5;min-width:0}
 #sendBtn{
   border:0;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
   display:grid;place-items:center;flex-shrink:0
@@ -210,9 +242,14 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
     <div id="msgs"><div class="col" id="col"></div></div>
     <div class="composer">
       <div class="box">
-        <textarea id="input" rows="1" placeholder="메시지를 입력하세요"></textarea>
-        <button id="sendBtn" aria-label="보내기" disabled></button>
+        <div class="tray" id="tray" hidden></div>
+        <div class="box-row">
+          <button id="attachBtn" aria-label="파일 첨부" title="사진이나 문서 첨부"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button>
+          <textarea id="input" rows="1" placeholder="메시지를 입력하세요"></textarea>
+          <button id="sendBtn" aria-label="보내기" disabled></button>
+        </div>
       </div>
+      <input type="file" id="fileIn" multiple hidden accept="image/*,.pdf,.docx,.xlsx,.xls,.csv,.tsv,.txt,.md,.json,.xml,.html,.htm,.log,.yaml,.yml,.py,.js,.ts,.sql">
     </div>
   </main>
 </div>
@@ -236,6 +273,12 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
       <div class="hint">키를 입력한 뒤 목록 불러오기를 누르면 쓸 수 있는 모델이 나와요.</div>
     </div>
     <div class="field">
+      <label>이미지 생성</label>
+      <label class="check"><input type="checkbox" id="sImg"> 채팅에서 그려 달라고 하면 이미지 만들기</label>
+      <select id="sImgModel"></select>
+      <div class="hint">이미지 분석은 고른 채팅 모델이 하고, 그림은 여기서 고른 이미지 모델이 그려요.</div>
+    </div>
+    <div class="field">
       <label>지시문</label>
       <button class="btn" id="manageFromSettings">저장된 지시문 관리</button>
       <div class="hint">지시문은 대화 화면 위쪽 버튼에서 대화마다 따로 바꿀 수 있어요.</div>
@@ -244,7 +287,7 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
     <div class="field">
       <label for="sClient">구글 클라이언트 ID</label>
       <input id="sClient" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com">
-      <div class="hint">대화와 지시문을 기기끼리 동기화할 때 필요해요.</div>
+      <div class="hint">대화, 지시문, 첨부한 사진과 파일을 기기끼리 동기화할 때 필요해요.</div>
     </div>
     <div class="row" style="margin-bottom:8px">
       <button class="btn" id="gConnect">구글 드라이브 연결</button>
@@ -318,6 +361,13 @@ const LS = {
 };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 let settings = LS.get('settings', { apiKey:'', model:'', models:[], clientId:'' });
+if (settings.imageGen === undefined) settings.imageGen = true;
+if (!settings.imageModel) settings.imageModel = 'gpt-image-1';
+if (!settings.imageModels) settings.imageModels = [];
+let pendingAttDeletes = LS.get('pendingAttDeletes', []);
+let pending = [];           // 첨부 대기 중인 파일
+let remoteAtts = {};        // 드라이브에 있는 첨부파일 id -> fileId
+const attCache = new Map();
 let convs = LS.get('convs', {});
 let pendingDeletes = LS.get('pendingDeletes', []);
 let currentId = LS.get('currentId', null);
@@ -371,6 +421,153 @@ function renderChip(){
   b.title = a.system || '지시문 없음';
 }
 
+/* ---------- 첨부파일 저장소 (IndexedDB) ---------- */
+const idb = (() => {
+  let p;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open('mychat', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('atts');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const tx = (mode, fn) => open().then(db => new Promise((res, rej) => {
+    const t = db.transaction('atts', mode); const req = fn(t.objectStore('atts'));
+    t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error);
+  }));
+  return { get: id => tx('readonly', s => s.get(id)), put: (id, v) => tx('readwrite', s => s.put(v, id)), del: id => tx('readwrite', s => s.delete(id)) };
+})();
+
+async function getAtt(id){
+  if (attCache.has(id)) return attCache.get(id);
+  let v = await idb.get(id).catch(() => null);
+  if (!v && validToken()){
+    try{
+      let fid = remoteAtts[id];
+      if (!fid){
+        const q = encodeURIComponent(`name='att-${id}.json'`);
+        const j = await (await gfetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id)`)).json();
+        fid = j.files?.[0]?.id;
+      }
+      if (fid){ v = await download(fid); remoteAtts[id] = fid; await idb.put(id, v).catch(() => {}) }
+    }catch(e){}
+  }
+  if (v) attCache.set(id, v);
+  return v || null;
+}
+function dropAtts(c, remember){
+  for (const m of c.messages) for (const a of (m.atts || [])){
+    idb.del(a.id).catch(() => {}); attCache.delete(a.id);
+    if (remember) pendingAttDeletes.push(a.id);
+  }
+  if (remember) LS.set('pendingAttDeletes', pendingAttDeletes);
+}
+
+const readAsDataURL = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f) });
+const scripts = {};
+const loadScript = src => scripts[src] || (scripts[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => { delete scripts[src]; rej(new Error('도구를 불러오지 못했어요. 인터넷 연결을 확인해 주세요')) }; document.head.appendChild(s) }));
+
+async function imageToDataURL(file){
+  const url = URL.createObjectURL(file);
+  try{
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('이미지를 열 수 없어요')); i.src = url });
+    const max = 1600, w = img.naturalWidth, h = img.naturalHeight;
+    if (w <= max && h <= max && file.size < 1.5e6 && /png|jpeg|webp|gif/.test(file.type)) return await readAsDataURL(file);
+    const k = Math.min(1, max / Math.max(w, h));
+    const cv = document.createElement('canvas'); cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, 0, 0, cv.width, cv.height);
+    return cv.toDataURL('image/jpeg', 0.85);
+  } finally { URL.revokeObjectURL(url) }
+}
+
+const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|xml|html?|css|js|ts|py|java|c|cpp|h|sql|ya?ml|log|ini)$/i;
+const MAX_TEXT = 150000;
+function fileLabel(a){
+  if (a.kind === 'pdf') return 'PDF';
+  const m = (a.name || '').match(/\.([a-z0-9]+)$/i);
+  return m ? m[1].toUpperCase() : '파일';
+}
+async function addFiles(files){
+  for (const f of files){
+    try{
+      if (f.size > 25e6){ toast(`${f.name}: 25MB 이하 파일만 올릴 수 있어요`); continue }
+      const name = f.name || ('붙여넣은 이미지.' + ((f.type.split('/')[1]) || 'png'));
+      const att = { id: uid(), name, mime: f.type || '' };
+      if (f.type.startsWith('image/') && !f.type.includes('svg')){
+        att.kind = 'image'; att.data = await imageToDataURL(f); att.mime = att.data.slice(5, att.data.indexOf(';'));
+      } else if (f.type === 'application/pdf' || /\.pdf$/i.test(name)){
+        att.kind = 'pdf'; att.mime = 'application/pdf'; att.data = await readAsDataURL(f);
+      } else if (/\.docx$/i.test(name)){
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+        att.kind = 'text'; att.data = (await mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() })).value;
+      } else if (/\.xlsx?$/i.test(name)){
+        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+        const wb = XLSX.read(await f.arrayBuffer(), { type:'array' });
+        att.kind = 'text'; att.data = wb.SheetNames.map(n => `## 시트: ${n}\n` + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n');
+      } else if (f.type.startsWith('text/') || TEXT_EXT.test(name)){
+        att.kind = 'text'; att.data = await f.text();
+      } else if (/\.hwpx?$/i.test(name)){ toast('한글(HWP) 파일은 PDF로 저장해서 올려 주세요'); continue }
+      else if (/\.pptx?$/i.test(name)){ toast('PPT 파일은 PDF로 저장해서 올려 주세요'); continue }
+      else { toast(`${name}: 아직 읽을 수 없는 형식이에요`); continue }
+      if (att.kind === 'text' && att.data.length > MAX_TEXT){
+        att.data = att.data.slice(0, MAX_TEXT) + '\n\n(파일이 길어서 여기까지만 넣었어요)';
+        toast(`${name}: 내용이 길어서 앞부분만 넣었어요`);
+      }
+      pending.push(att);
+    }catch(e){ toast(`${f.name || '파일'}: ${e.message}`) }
+  }
+  renderTray();
+}
+function renderTray(){
+  const tray = $('tray'); tray.innerHTML = ''; tray.hidden = !pending.length;
+  for (const a of pending){
+    const c = document.createElement('div'); c.className = 'tchip';
+    if (a.kind === 'image'){ const i = document.createElement('img'); i.src = a.data; i.alt = a.name; c.appendChild(i) }
+    else { c.innerHTML = '<div class="fname"><b></b><span></span></div>'; c.querySelector('b').textContent = fileLabel(a); c.querySelector('span').textContent = a.name }
+    const x = document.createElement('button'); x.className = 'tx'; x.textContent = '×'; x.setAttribute('aria-label', a.name + ' 빼기');
+    x.onclick = () => { pending = pending.filter(p => p !== a); renderTray() };
+    c.appendChild(x); tray.appendChild(c);
+  }
+  updateSendBtn();
+}
+
+function attsEl(list){
+  const box = document.createElement('div'); box.className = 'atts';
+  for (const a of list) box.appendChild(attEl(a));
+  return box;
+}
+function attEl(a){
+  if (a.kind === 'image'){
+    const b = document.createElement('button'); b.className = 'att-img' + (a.generated ? ' big' : '');
+    b.setAttribute('aria-label', a.generated ? '생성한 이미지 크게 보기' : a.name + ' 크게 보기');
+    const img = document.createElement('img'); img.alt = a.prompt || a.name || '';
+    b.appendChild(img);
+    getAtt(a.id).then(v => {
+      if (v) img.src = v.data;
+      else { b.classList.add('missing'); b.textContent = '이미지를 불러오지 못했어요'; b.onclick = null }
+    });
+    b.onclick = () => lightbox(a);
+    return b;
+  }
+  const c = document.createElement('div'); c.className = 'fchip';
+  c.innerHTML = '<b></b><span></span>';
+  c.querySelector('b').textContent = fileLabel(a); c.querySelector('span').textContent = a.name;
+  return c;
+}
+async function lightbox(a){
+  const v = await getAtt(a.id); if (!v) return;
+  const lb = document.createElement('div'); lb.className = 'lightbox';
+  lb.innerHTML = '<img alt=""><div class="row"><a class="btn">저장</a><button class="btn">닫기</button></div>';
+  lb.querySelector('img').src = v.data;
+  const dl = lb.querySelector('a'); dl.href = v.data;
+  dl.download = a.generated ? `image-${a.id}.png` : (a.name || 'image');
+  const close = () => { lb.remove(); document.removeEventListener('keydown', onKey) };
+  const onKey = e => { if (e.key === 'Escape') close() };
+  lb.querySelector('button').onclick = close;
+  lb.onclick = e => { if (e.target === lb) close() };
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(lb);
+}
+
 /* ---------- 화면 그리기 ---------- */
 const ICON_SEND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
 const ICON_STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
@@ -414,14 +611,21 @@ function msgEl(m){
   const d = document.createElement('div');
   d.className = 'msg ' + m.role;
   const body = document.createElement('div'); body.className = 'body';
-  if (m.role === 'user') body.textContent = m.content; else body.innerHTML = md(m.content);
-  d.appendChild(body);
-  if (m.role === 'assistant'){
-    const t = document.createElement('div'); t.className = 'msg-tools';
-    const cp = document.createElement('button'); cp.textContent = '복사';
-    cp.onclick = () => navigator.clipboard.writeText(m.content).then(() => toast('복사했어요'));
-    t.appendChild(cp); d.appendChild(t);
+  if (m.role === 'user'){
+    const wrap = document.createElement('div'); wrap.className = 'ucol';
+    if (m.atts?.length) wrap.appendChild(attsEl(m.atts));
+    if (m.content){ body.textContent = m.content; wrap.appendChild(body) }
+    d.appendChild(wrap);
+    return d;
   }
+  body.innerHTML = m.content ? md(m.content) : '';
+  d.appendChild(body);
+  const ab = attsEl(m.atts || []); ab.classList.add('gen-atts'); if (!m.atts?.length) ab.hidden = true;
+  d.appendChild(ab);
+  const t = document.createElement('div'); t.className = 'msg-tools';
+  const cp = document.createElement('button'); cp.textContent = '복사';
+  cp.onclick = () => navigator.clipboard.writeText(m.content).then(() => toast('복사했어요'));
+  t.appendChild(cp); d.appendChild(t);
   return d;
 }
 
@@ -433,7 +637,7 @@ function scrollDown(force){
 function updateSendBtn(){
   const btn = $('sendBtn');
   if (busy){ btn.innerHTML = ICON_STOP; btn.disabled = false; btn.setAttribute('aria-label','멈추기') }
-  else { btn.innerHTML = ICON_SEND; btn.disabled = !$('input').value.trim(); btn.setAttribute('aria-label','보내기') }
+  else { btn.innerHTML = ICON_SEND; btn.disabled = !$('input').value.trim() && !pending.length; btn.setAttribute('aria-label','보내기') }
 }
 
 /* ---------- 대화 관리 ---------- */
@@ -446,69 +650,191 @@ function removeConv(id){
   const c = convs[id]; if (!c) return;
   if (!confirm(`"${c.title || '새 대화'}" 대화를 삭제할까요?`)) return;
   if (c.driveId){ pendingDeletes.push(c.driveId); LS.set('pendingDeletes', pendingDeletes) }
+  dropAtts(c, true);
   delete convs[id]; saveConvs();
   if (currentId === id){ currentId = null; LS.set('currentId', null); draft = freshDraft() }
   renderList(); renderMsgs(); queueSync();
 }
 
 /* ---------- OpenAI 호출 ---------- */
+const IMG_TOOL = { type:'function', function:{
+  name:'generate_image',
+  description:'사용자가 그림, 이미지, 일러스트, 사진, 로고, 포스터, 썸네일 등을 만들어 달라고 하거나 앞선 이미지를 고쳐 달라고 할 때만 호출한다. 대화 맥락을 반영해 prompt를 영어로 자세하게 쓰고, 이미지 안에 들어갈 글자는 사용자가 정한 원문 그대로 따옴표 안에 넣는다. 호출이 끝나면 이미지는 이미 사용자에게 보이므로 짧게 설명만 덧붙인다.',
+  parameters:{ type:'object', properties:{
+    prompt:{ type:'string', description:'이미지 생성용 상세 프롬프트' },
+    size:{ type:'string', enum:['1024x1024','1536x1024','1024x1536'], description:'정사각형, 가로형, 세로형 중 선택' },
+    edit_last_image:{ type:'boolean', description:'대화에서 가장 최근 이미지(사용자가 올린 사진 포함)를 바탕으로 고칠 때 true' }
+  }, required:['prompt'] }
+}};
+
+async function buildPayload(c){
+  const out = [];
+  if ((c.system || '').trim()) out.push({ role:'system', content: c.system.trim() });
+  for (const m of c.messages){
+    if (m.role === 'assistant'){
+      let t = m.content || '';
+      for (const a of (m.atts || [])) if (a.generated) t += `\n\n[이 답변에서 이미지를 생성해 보여줌: ${a.prompt || ''}]`;
+      out.push({ role:'assistant', content: t || '(이미지만 보여줌)' });
+      continue;
+    }
+    if (!m.atts?.length){ out.push({ role:'user', content: m.content }); continue }
+    let text = m.content || '';
+    const parts = [];
+    for (const a of m.atts){
+      const v = await getAtt(a.id);
+      if (!v){ text += `\n\n[첨부 파일 ${a.name}을 불러오지 못했어요]`; continue }
+      if (a.kind === 'image') parts.push({ type:'image_url', image_url:{ url: v.data } });
+      else if (a.kind === 'pdf') parts.push({ type:'file', file:{ filename: a.name, file_data: v.data } });
+      else text += `\n\n[첨부 파일: ${a.name}]\n\`\`\`\n${v.data}\n\`\`\``;
+    }
+    out.push({ role:'user', content: [{ type:'text', text: text || '첨부한 파일을 확인해 줘.' }, ...parts] });
+  }
+  return out;
+}
+
+async function streamChat(messages, useTools, onText){
+  const body = { model: settings.model, messages, stream: true };
+  if (useTools) body.tools = [IMG_TOOL];
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
+    body: JSON.stringify(body), signal: abortCtl.signal
+  });
+  if (!res.ok){
+    const j = await res.json().catch(() => ({}));
+    const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
+    if (useTools && res.status === 400 && /tool|function/i.test(msg)) return streamChat(messages, false, onText);
+    throw new Error(msg);
+  }
+  const reader = res.body.getReader(); const dec = new TextDecoder();
+  let buf = '', text = ''; const calls = [];
+  while (true){
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream:true });
+    const lines = buf.split('\n'); buf = lines.pop();
+    for (const line of lines){
+      const l = line.trim(); if (!l.startsWith('data:')) continue;
+      const data = l.slice(5).trim(); if (data === '[DONE]') continue;
+      let delta; try{ delta = JSON.parse(data).choices?.[0]?.delta }catch(e){ continue }
+      if (!delta) continue;
+      if (delta.content){ text += delta.content; onText(delta.content) }
+      for (const tc of (delta.tool_calls || [])){
+        const k = calls[tc.index] || (calls[tc.index] = { id:'', name:'', args:'' });
+        if (tc.id) k.id = tc.id;
+        if (tc.function?.name) k.name += tc.function.name;
+        if (tc.function?.arguments) k.args += tc.function.arguments;
+      }
+    }
+  }
+  return { text, calls: calls.filter(Boolean) };
+}
+
+function lastImageId(c, reply){
+  for (const a of [...(reply.atts || [])].reverse()) if (a.kind === 'image') return a.id;
+  for (const m of [...c.messages].reverse()) for (const a of [...(m.atts || [])].reverse()) if (a.kind === 'image') return a.id;
+  return null;
+}
+
+async function generateImage(args, c, reply){
+  const model = settings.imageModel || 'gpt-image-1';
+  const isDalle = model.startsWith('dall-e');
+  let size = args.size || '1024x1024';
+  if (isDalle && size !== '1024x1024') size = size === '1536x1024' ? '1792x1024' : '1024x1792';
+  let res;
+  if (args.edit_last_image){
+    const lid = lastImageId(c, reply); const src = lid && await getAtt(lid);
+    if (!src) throw new Error('고칠 이미지를 찾지 못했어요');
+    const blob = await (await fetch(src.data)).blob();
+    const fd = new FormData();
+    fd.append('model', model); fd.append('prompt', args.prompt);
+    fd.append('image', blob, 'image.' + ((blob.type.split('/')[1]) || 'png'));
+    if (!isDalle) fd.append('size', size); else fd.append('response_format', 'b64_json');
+    res = await fetch('https://api.openai.com/v1/images/edits', { method:'POST', headers:{ Authorization:'Bearer ' + settings.apiKey }, body: fd, signal: abortCtl.signal });
+  } else {
+    const body = { model, prompt: args.prompt, size, n: 1 };
+    if (isDalle) body.response_format = 'b64_json';
+    res = await fetch('https://api.openai.com/v1/images/generations', {
+      method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + settings.apiKey },
+      body: JSON.stringify(body), signal: abortCtl.signal
+    });
+  }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error?.message || ('이미지 생성 실패 (' + res.status + ')'));
+  const b64 = j.data?.[0]?.b64_json;
+  if (!b64) throw new Error('이미지를 받지 못했어요');
+  const id = uid(), data = 'data:image/png;base64,' + b64;
+  const v = { kind:'image', mime:'image/png', name:`image-${id}.png`, data };
+  await idb.put(id, v); attCache.set(id, v);
+  return { id, kind:'image', mime:'image/png', name:'생성한 이미지.png', prompt: args.prompt, generated: true };
+}
+
 async function send(){
   if (busy){ abortCtl && abortCtl.abort(); return }
   const text = $('input').value.trim();
-  if (!text) return;
+  if (!text && !pending.length) return;
   if (!settings.apiKey || !settings.model){ openSettings(); toast('API 키와 모델을 먼저 설정해 주세요'); return }
+
+  const sendAtts = pending; pending = []; renderTray();
+  for (const a of sendAtts){ const v = { kind:a.kind, mime:a.mime, name:a.name, data:a.data }; attCache.set(a.id, v); await idb.put(a.id, v).catch(() => {}) }
+  const metas = sendAtts.map(a => ({ id:a.id, kind:a.kind, name:a.name, mime:a.mime }));
 
   let c = convs[currentId];
   if (!c){
-    c = { id: uid(), title: text.slice(0, 30), created: Date.now(), updated: Date.now(), messages: [],
+    c = { id: uid(), title: (text || metas[0]?.name || '첨부 파일').slice(0, 30), created: Date.now(), updated: Date.now(), messages: [],
           system: draft.system, promptId: draft.promptId };
     convs[c.id] = c; currentId = c.id; LS.set('currentId', c.id);
   }
-  c.messages.push({ role:'user', content:text });
+  const userMsg = { role:'user', content:text };
+  if (metas.length) userMsg.atts = metas;
+  c.messages.push(userMsg);
   c.updated = Date.now(); saveConvs();
   $('input').value = ''; autoGrow();
   renderList(); renderMsgs();
 
-  const reply = { role:'assistant', content:'' };
-  const el = msgEl(reply); const body = el.querySelector('.body');
+  const reply = { role:'assistant', content:'', atts:[] };
+  const el = msgEl(reply); const body = el.querySelector('.body'); const genBox = el.querySelector('.gen-atts');
   body.classList.add('cursor'); $('col').appendChild(el); scrollDown(true);
 
   busy = true; updateSendBtn(); abortCtl = new AbortController();
-  const payload = [];
-  if ((c.system || '').trim()) payload.push({ role:'system', content: c.system.trim() });
-  for (const m of c.messages) payload.push({ role:m.role, content:m.content });
-
-  let pending = false;
-  const paint = () => { if (pending) return; pending = true; requestAnimationFrame(() => { body.innerHTML = md(reply.content); pending = false; scrollDown() }) };
+  let pendingPaint = false;
+  const paint = () => { if (pendingPaint) return; pendingPaint = true; requestAnimationFrame(() => { body.innerHTML = md(reply.content); pendingPaint = false; scrollDown() }) };
+  const onText = t => { reply.content += t; paint() };
 
   try{
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
-      body: JSON.stringify({ model: settings.model, messages: payload, stream: true }),
-      signal: abortCtl.signal
-    });
-    if (!res.ok){
-      const j = await res.json().catch(() => ({}));
-      throw new Error(j.error?.message || ('요청 실패 (' + res.status + ')'));
-    }
-    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
-    while (true){
-      const { value, done } = await reader.read(); if (done) break;
-      buf += dec.decode(value, { stream:true });
-      const lines = buf.split('\n'); buf = lines.pop();
-      for (const line of lines){
-        const l = line.trim(); if (!l.startsWith('data:')) continue;
-        const data = l.slice(5).trim(); if (data === '[DONE]') continue;
-        try{ const d = JSON.parse(data).choices?.[0]?.delta?.content; if (d){ reply.content += d; paint() } }catch(e){}
+    const apiMsgs = await buildPayload(c);
+    const useTools = !!settings.imageGen;
+    let r = await streamChat(apiMsgs, useTools, onText);
+    for (let round = 0; round < 3 && r.calls.length; round++){
+      apiMsgs.push({ role:'assistant', content: r.text || null,
+        tool_calls: r.calls.map(t => ({ id:t.id, type:'function', function:{ name:t.name, arguments:t.args || '{}' } })) });
+      for (const t of r.calls){
+        let result;
+        if (t.name !== 'generate_image'){ result = '알 수 없는 도구예요.' }
+        else {
+          const st = document.createElement('div'); st.className = 'gen-status'; st.textContent = '이미지를 그리는 중이에요. 30초쯤 걸릴 수 있어요';
+          el.insertBefore(st, el.querySelector('.msg-tools')); scrollDown(true);
+          try{
+            let args = {}; try{ args = JSON.parse(t.args || '{}') }catch(e){}
+            if (!args.prompt) throw new Error('그릴 내용을 알 수 없어요');
+            const meta = await generateImage(args, c, reply);
+            reply.atts.push(meta); genBox.hidden = false; genBox.appendChild(attEl(meta));
+            result = '이미지를 생성해서 사용자에게 이미 보여줬어요. 이미지를 다시 묘사하지 말고 한두 문장으로만 덧붙이세요.';
+          }catch(e){
+            if (e.name === 'AbortError') throw e;
+            result = '이미지 생성 실패: ' + e.message + ' 사용자에게 이유를 쉽게 알려 주세요.';
+          }finally{ st.remove() }
+        }
+        apiMsgs.push({ role:'tool', tool_call_id: t.id, content: result });
       }
+      if (reply.content) onText('\n\n');
+      r = await streamChat(apiMsgs, useTools, onText);
     }
   }catch(err){
     if (err.name !== 'AbortError'){
-      if (!reply.content){
+      if (!reply.content && !reply.atts.length){
         c.messages.pop(); el.remove();
         $('col').lastElementChild?.remove();
         $('input').value = text; autoGrow();
+        pending = sendAtts; renderTray();
         if (!c.messages.length){
           draft = { system: c.system || '', promptId: c.promptId || null };
           delete convs[c.id]; currentId = null; LS.set('currentId', null);
@@ -519,8 +845,11 @@ async function send(){
     }
   }finally{
     busy = false; abortCtl = null; body.classList.remove('cursor');
-    if (reply.content){
-      body.innerHTML = md(reply.content);
+    el.querySelectorAll('.gen-status').forEach(x => x.remove());
+    if (reply.content || reply.atts.length){
+      reply.content = reply.content.trim();
+      body.innerHTML = reply.content ? md(reply.content) : '';
+      if (!reply.atts.length) delete reply.atts;
       c.messages.push(reply); c.updated = Date.now(); saveConvs(); renderList(); queueSync();
     } else if (el.isConnected){ el.remove() }
     updateSendBtn();
@@ -537,6 +866,8 @@ async function loadModels(){
     const skip = /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|davinci|babbage|search|computer-use/i;
     const ids = j.data.map(m => m.id).filter(id => /^(gpt|o\d|chatgpt)/i.test(id) && !skip.test(id)).sort().reverse();
     settings.models = ids; fillModels(ids, $('sModel').value || settings.model);
+    const imgIds = j.data.map(m => m.id).filter(id => /^(gpt-image|dall-e-3)/i.test(id)).sort().reverse();
+    settings.imageModels = imgIds; fillImageModels(imgIds, $('sImgModel').value || settings.imageModel);
     toast(ids.length + '개 모델을 불러왔어요');
   }catch(e){ toast(e.message) }
 }
@@ -545,6 +876,13 @@ function fillModels(ids, sel){
   if (!ids.length){ s.innerHTML = '<option value="">목록을 먼저 불러와 주세요</option>'; return }
   for (const id of ids){ const o = document.createElement('option'); o.value = o.textContent = id; s.appendChild(o) }
   if (sel && ids.includes(sel)) s.value = sel;
+}
+
+function fillImageModels(ids, sel){
+  const s = $('sImgModel'); s.innerHTML = '';
+  const list = ids.length ? ids : ['gpt-image-1'];
+  for (const id of list){ const o = document.createElement('option'); o.value = o.textContent = id; s.appendChild(o) }
+  s.value = list.includes(sel) ? sel : list[0];
 }
 
 /* ---------- 이 대화의 지시문 ---------- */
@@ -749,12 +1087,24 @@ async function sync(){
       await gfetch('https://www.googleapis.com/drive/v3/files/' + pendingDeletes[0], { method:'DELETE' });
       pendingDeletes.shift(); LS.set('pendingDeletes', pendingDeletes);
     }
-    const remote = {}; let remotePrompts = null;
+    const remote = {}; let remotePrompts = null; remoteAtts = {};
     for (const f of await listRemote()){
       const upd = Number(f.appProperties?.updated || 0);
       if (f.name === 'prompts.json'){ remotePrompts = { fileId: f.id, updated: upd }; continue }
+      const am = f.name.match(/^att-(.+)\.json$/); if (am){ remoteAtts[am[1]] = f.id; continue }
       const m = f.name.match(/^conv-(.+)\.json$/); if (!m) continue;
       remote[m[1]] = { fileId: f.id, updated: upd };
+    }
+    // 첨부파일: 지운 것 정리, 새로 생긴 것 올리기
+    while (pendingAttDeletes.length){
+      const aid = pendingAttDeletes[0];
+      if (remoteAtts[aid]){ await gfetch('https://www.googleapis.com/drive/v3/files/' + remoteAtts[aid], { method:'DELETE' }); delete remoteAtts[aid] }
+      pendingAttDeletes.shift(); LS.set('pendingAttDeletes', pendingAttDeletes);
+    }
+    for (const c of Object.values(convs)) for (const m of c.messages) for (const a of (m.atts || [])){
+      if (remoteAtts[a.id]) continue;
+      const v = await idb.get(a.id).catch(() => null);
+      if (v) remoteAtts[a.id] = await uploadFile('att-' + a.id + '.json', v, 0, null);
     }
     // 대화
     for (const [id, r] of Object.entries(remote)){
@@ -768,7 +1118,7 @@ async function sync(){
     }
     for (const c of Object.values(convs)){
       if (remote[c.id]) continue;
-      if (c.driveId){ delete convs[c.id]; if (currentId === c.id){ currentId = null; LS.set('currentId', null) } }
+      if (c.driveId){ dropAtts(c, false); delete convs[c.id]; if (currentId === c.id){ currentId = null; LS.set('currentId', null) } }
       else await uploadConv(c);
     }
     saveConvs();
@@ -799,6 +1149,8 @@ function queueSync(){ clearTimeout(syncTimer); syncTimer = setTimeout(sync, 1200
 function openSettings(){
   $('sKey').value = settings.apiKey; $('sClient').value = settings.clientId;
   fillModels(settings.models || [], settings.model);
+  fillImageModels(settings.imageModels || [], settings.imageModel);
+  $('sImg').checked = !!settings.imageGen;
   $('dlg').showModal();
 }
 function saveSettings(){
@@ -806,6 +1158,8 @@ function saveSettings(){
   settings.apiKey = $('sKey').value.trim();
   settings.model = $('sModel').value || settings.model;
   settings.clientId = $('sClient').value.trim();
+  settings.imageGen = $('sImg').checked;
+  settings.imageModel = $('sImgModel').value || 'gpt-image-1';
   LS.set('settings', settings);
   if (clientChanged){ tokenClient = null; initGoogle() }
   $('dlg').close(); renderMsgs(); toast('저장했어요');
@@ -819,6 +1173,25 @@ $('input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !touch && !e.isComposing){ e.preventDefault(); send() }
 });
 $('sendBtn').onclick = send;
+$('attachBtn').onclick = () => $('fileIn').click();
+$('fileIn').onchange = e => { addFiles([...e.target.files]); e.target.value = '' };
+function pasteFiles(e){
+  const files = [...(e.clipboardData?.files || [])];
+  const text = e.clipboardData?.getData('text/plain') || '';
+  if (files.length && !text.trim()){ e.preventDefault(); addFiles(files); return true }
+  return false;
+}
+$('input').addEventListener('paste', pasteFiles);
+document.addEventListener('paste', e => {
+  if (e.target.closest && e.target.closest('input,textarea,dialog')) return;
+  if (pasteFiles(e)) $('input').focus();
+});
+let dragDepth = 0;
+const app = $('app');
+app.addEventListener('dragenter', e => { if (e.dataTransfer?.types?.includes('Files')){ e.preventDefault(); dragDepth++; app.classList.add('dragging') } });
+app.addEventListener('dragover', e => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault() });
+app.addEventListener('dragleave', () => { if (--dragDepth <= 0){ dragDepth = 0; app.classList.remove('dragging') } });
+app.addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; app.classList.remove('dragging'); if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]) });
 $('newBtn').onclick = newConv;
 $('setBtn').onclick = openSettings;
 $('menuBtn').onclick = () => $('app').classList.add('open');
