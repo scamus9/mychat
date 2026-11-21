@@ -1525,28 +1525,55 @@ let tokenClient = null, syncing = false, syncTimer = null;
 
 function initGoogle(){
   if (!window.google?.accounts?.oauth2 || !settings.clientId){ setSync(); return }
+  const hint = LS.get('gHint', '') || undefined;
   tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: settings.clientId, scope: SCOPE,
+    client_id: settings.clientId, scope: SCOPE, hint,
     callback: r => {
-      if (r.error){ toast('구글 연결에 실패했어요'); setSync(); return }
+      const silent = renewing; renewing = false;
+      if (r.error){ if (silent) renewFails++; else toast('구글 연결에 실패했어요'); setSync(); return }
+      renewFails = 0;
       LS.set('gtoken', { access: r.access_token, exp: Date.now() + (r.expires_in - 60) * 1000 });
-      LS.set('gconnected', true); toast('구글 드라이브에 연결했어요'); sync();
-    }
+      if (!silent) toast('구글 드라이브에 연결했어요');
+      LS.set('gconnected', true); sync(); rememberAccount();
+    },
+    error_callback: () => { if (renewing) renewFails++; renewing = false; setSync() }
   });
   setSync();
   if (validToken()) sync();
 }
 function validToken(){ const t = LS.get('gtoken', null); return t && t.exp > Date.now() ? t.access : null }
+
+/* 출입증(토큰)이 곧 끝나거나 끝났으면, 사용자가 화면을 누를 때 조용히 새로 받아옴 */
+let renewing = false, lastRenew = 0, renewFails = 0;
+function tokenEndingSoon(){ const t = LS.get('gtoken', null); return !t || t.exp - Date.now() < 10 * 60 * 1000 }
+function maybeRenew(){
+  if (!LS.get('gconnected', false) || !tokenClient || renewing || !navigator.onLine) return;
+  if (!tokenEndingSoon() || renewFails >= 3 || Date.now() - lastRenew < 2 * 60 * 1000) return;
+  renewing = true; lastRenew = Date.now();
+  try{ tokenClient.requestAccessToken({ prompt: '', hint: LS.get('gHint', '') || undefined }) }
+  catch(e){ renewing = false; renewFails++ }
+  setTimeout(() => { if (renewing){ renewing = false; setSync() } }, 60 * 1000);
+}
+document.addEventListener('click', maybeRenew, true);
+document.addEventListener('keydown', e => { if (e.key === 'Enter') maybeRenew() }, true);
+async function rememberAccount(){
+  if (LS.get('gHint', '')) return;
+  try{
+    const j = await (await gfetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)')).json();
+    if (j.user?.emailAddress){ LS.set('gHint', j.user.emailAddress); tokenClient = null; initGoogle() }
+  }catch(e){}
+}
 function connectGoogle(){
   if (!settings.clientId){ toast('구글 클라이언트 ID를 먼저 저장해 주세요'); return }
   if (!tokenClient) initGoogle();
   if (!tokenClient){ toast('구글 로그인을 불러오지 못했어요. 새로고침해 주세요'); return }
-  tokenClient.requestAccessToken({ prompt: LS.get('gconnected', false) ? '' : 'consent' });
+  renewing = false; renewFails = 0;
+  tokenClient.requestAccessToken({ prompt: LS.get('gconnected', false) ? '' : 'consent', hint: LS.get('gHint', '') || undefined });
 }
 function disconnectGoogle(){
   const t = validToken();
   if (t && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(t, () => {});
-  LS.set('gtoken', null); LS.set('gconnected', false);
+  LS.set('gtoken', null); LS.set('gconnected', false); LS.set('gHint', '');
   for (const c of Object.values(convs)) delete c.driveId;
   delete promptsStore.driveId; LS.set('prompts', promptsStore);
   if (balanceBase){ delete balanceBase.driveId; LS.set('balanceBase', balanceBase) }
@@ -1559,7 +1586,11 @@ function setSync(state){
   if (state === 'busy'){ dot.classList.add('busy'); txt.textContent = '동기화하는 중'; return }
   if (state === 'error'){ dot.classList.add('warn'); txt.textContent = '동기화 실패, 눌러서 다시 시도'; return }
   if (!LS.get('gconnected', false)){ txt.textContent = '동기화 꺼짐'; return }
-  if (!validToken()){ dot.classList.add('warn'); txt.textContent = '눌러서 다시 연결'; return }
+  if (!validToken()){
+    dot.classList.add('warn');
+    txt.textContent = renewFails >= 3 ? '눌러서 다시 연결' : '잠시 끊김 · 다음 터치 때 다시 연결';
+    return;
+  }
   dot.classList.add('ok');
   const at = LS.get('lastSync', 0);
   txt.textContent = at ? '동기화됨 ' + new Date(at).toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' }) : '동기화됨';
