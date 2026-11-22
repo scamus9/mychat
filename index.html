@@ -999,7 +999,8 @@ function renderList(){
   }
 }
 
-function renderMsgs(){
+function renderMsgs(keepScroll){
+  const box = $('msgs'), prevTop = box.scrollTop;
   const col = $('col'); col.innerHTML = '';
   const c = convs[currentId];
   $('title').textContent = c ? (c.title || '새 대화') : '새 대화';
@@ -1014,7 +1015,7 @@ function renderMsgs(){
     return;
   }
   for (const m of c.messages) col.appendChild(msgEl(m));
-  scrollDown(true);
+  if (keepScroll && !stick) box.scrollTop = prevTop; else scrollDown(true);
 }
 
 function metaText(m){
@@ -1052,6 +1053,14 @@ function scrollDown(force){
   if (force) stick = true;
   if (stick) box.scrollTop = box.scrollHeight;
 }
+// 위로 올리려는 손동작이 보이면 바로 따라가기를 멈춤
+$('msgs').addEventListener('wheel', e => { if (e.deltaY < 0) stick = false }, { passive:true });
+let touchY = null;
+$('msgs').addEventListener('touchstart', e => { touchY = e.touches[0]?.clientY ?? null }, { passive:true });
+$('msgs').addEventListener('touchmove', e => {
+  const y = e.touches[0]?.clientY;
+  if (touchY !== null && y - touchY > 6) stick = false;
+}, { passive:true });
 $('msgs').addEventListener('scroll', () => {
   const b = $('msgs'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
 }, { passive:true });
@@ -1943,6 +1952,7 @@ async function sync(){
       await gfetch('https://www.googleapis.com/drive/v3/files/' + pendingDeletes[0], { method:'DELETE' });
       pendingDeletes.shift(); LS.set('pendingDeletes', pendingDeletes);
     }
+    let curChanged = false;
     const remote = {}; let remotePrompts = null; const remoteBalance = {}; const remoteUsage = {}; remoteAtts = {};
     for (const f of await listRemote()){
       const upd = Number(f.appProperties?.updated || 0);
@@ -1971,13 +1981,14 @@ async function sync(){
       if (!local || r.updated > local.updated){
         if (local && id === currentId && busy) continue;
         const data = await download(r.fileId); data.driveId = r.fileId; convs[id] = data;
+        if (id === currentId) curChanged = true;
       } else if (local.updated > r.updated){
         local.driveId = r.fileId; await uploadConv(local);
       } else local.driveId = r.fileId;
     }
     for (const c of Object.values(convs)){
       if (remote[c.id]) continue;
-      if (c.driveId){ dropAtts(c, false); delete convs[c.id]; if (currentId === c.id){ currentId = null; LS.set('currentId', null) } }
+      if (c.driveId){ dropAtts(c, false); delete convs[c.id]; if (currentId === c.id){ currentId = null; LS.set('currentId', null); curChanged = true } }
       else await uploadConv(c);
     }
     saveConvs();
@@ -2026,7 +2037,8 @@ async function sync(){
     LS.set('usageOthers', usageOthers);
     renderWallet();
     LS.set('lastSync', Date.now());
-    renderList(); if (!busy) renderMsgs();
+    renderList();
+    if (!busy && curChanged) renderMsgs(true); else renderChip();
     if ($('dlgM').open && $('mEditor').hidden) renderManage();
     setSync();
   }catch(e){
