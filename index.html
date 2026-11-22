@@ -96,6 +96,8 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .top h2{font-size:15px;font-weight:500;margin:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1}
 #menuBtn{display:none}
 .box{position:relative}
+.top{position:relative}
+.menu.exp-menu{left:auto;right:12px;top:calc(100% + 4px);bottom:auto}
 .box-foot{display:flex;align-items:center;gap:2px;margin-top:2px;min-width:0}
 .instr-pill{flex-shrink:1;min-width:0;max-width:34%;overflow:hidden;text-overflow:ellipsis}
 .menu{
@@ -307,6 +309,8 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
     <div class="top">
       <button class="icon-btn" id="menuBtn" aria-label="대화 목록 열기">☰</button>
       <h2 id="title">새 대화</h2>
+      <button class="icon-btn" id="expBtn" aria-haspopup="menu" aria-expanded="false" hidden>내보내기</button>
+      <div class="menu exp-menu" id="expMenu" role="menu" hidden></div>
     </div>
     <div id="msgs"><div class="col" id="col"></div></div>
     <div class="composer">
@@ -1001,6 +1005,7 @@ function renderList(){
 
 function renderMsgs(keepScroll){
   const box = $('msgs'), prevTop = box.scrollTop;
+  $('expBtn').hidden = !(convs[currentId]?.messages?.length);
   const col = $('col'); col.innerHTML = '';
   const c = convs[currentId];
   $('title').textContent = c ? (c.title || '새 대화') : '새 대화';
@@ -2076,6 +2081,87 @@ function saveSettings(){
   if (settings.model !== prevModel && !autoPrices.chat[settings.model]) checkPrices(true);
   else if (imgModelName(settings.imageModel) !== imgModelName(prevImg) && autoPrices.img[imgModelName(settings.imageModel)] === undefined) checkPrices(true);
 }
+
+/* ---------- 대화 내보내기 ---------- */
+const safeName = t => (t || '대화').replace(/[\\/:*?"<>|\n\r]+/g, ' ').trim().slice(0, 40) || '대화';
+const dateStr = () => { const d = new Date(); return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') };
+function convImages(c){ const out = []; for (const m of c.messages) for (const a of (m.atts || [])) if (a.kind === 'image') out.push(a); return out }
+
+async function buildExport(c, imgNames){
+  const models = [...new Set(c.messages.map(m => m.model).filter(Boolean))];
+  const lines = [];
+  lines.push(`# ${c.title || '대화'}`, '');
+  lines.push('> 이 파일은 다른 AI 채팅 앱에서 나눈 대화 기록이에요. 아래 대화의 맥락과 내 말투, 선호를 이해한 뒤, 마지막 내용에 자연스럽게 이어서 대화해 주세요. 이 파일을 요약하거나 다시 설명하지 말고, 바로 이어서 답해 주세요.', '');
+  lines.push(`- 내보낸 날짜: ${new Date().toLocaleString('ko-KR')}`);
+  if (models.length) lines.push(`- 이 대화에서 쓴 모델: ${models.join(', ')}`);
+  lines.push('');
+  if ((c.system || '').trim()) lines.push('## 이 대화에서 쓰던 지시문', '', c.system.trim(), '');
+  lines.push('## 대화 기록', '');
+  for (const m of c.messages){
+    lines.push(m.role === 'user' ? '### 나' : `### AI${m.model ? ' (' + m.model + ')' : ''}`, '');
+    if (m.content) lines.push(m.content, '');
+    for (const a of (m.atts || [])){
+      if (a.kind === 'image'){
+        const fn = imgNames?.get(a.id);
+        const what = a.generated ? `AI가 만든 이미지${a.prompt ? ' (내용: ' + a.prompt + ')' : ''}` : `내가 첨부한 이미지 ${a.name}`;
+        lines.push(fn ? `![${what}](images/${fn})` : `[${what}]`, '');
+      } else if (a.kind === 'text'){
+        const v = await getAtt(a.id);
+        const body = v?.data ? (v.data.length > 20000 ? v.data.slice(0, 20000) + '\n(길어서 여기까지만 넣었어요)' : v.data) : '';
+        lines.push(`[내가 첨부한 파일: ${a.name}]`, '', body ? '```\n' + body + '\n```' : '(내용을 불러오지 못했어요)', '');
+      } else lines.push(`[내가 첨부한 파일: ${a.name} · 원본은 따로 첨부해 주세요]`, '');
+    }
+  }
+  lines.push('---', '', '(여기까지가 지금까지의 대화예요. 이어서 대화해 주세요.)');
+  return lines.join('\n');
+}
+function downloadBlob(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function closeExpMenu(){ $('expMenu').hidden = true; $('expBtn').setAttribute('aria-expanded', 'false') }
+function openExpMenu(){
+  const c = convs[currentId]; if (!c) return;
+  const menu = $('expMenu'), imgs = convImages(c);
+  const base = `${safeName(c.title)}_${dateStr()}`;
+  menu.innerHTML = '<div class="mh">이 대화 내보내기</div>';
+  const item = (label, fn, sub) => {
+    const b = document.createElement('button'); b.className = 'mi'; b.setAttribute('role', 'menuitem');
+    b.innerHTML = '<span class="nm"></span>' + (sub ? '<small></small>' : '');
+    b.querySelector('.nm').textContent = label; if (sub) b.querySelector('small').textContent = sub;
+    b.onclick = async () => { closeExpMenu(); try{ await fn() }catch(e){ if (e.name !== 'AbortError') toast('내보내지 못했어요: ' + e.message) } };
+    menu.appendChild(b);
+  };
+  const mdFile = async () => new File([await buildExport(c)], base + '.md', { type:'text/markdown' });
+  if (navigator.canShare && navigator.canShare({ files:[new File(['x'], 'x.md', { type:'text/markdown' })] })){
+    item('다른 앱으로 보내기', async () => { await navigator.share({ files:[await mdFile()], title: c.title || '대화' }) }, 'Claude, ChatGPT 앱');
+  }
+  item('파일로 저장', async () => { downloadBlob(await mdFile(), base + '.md'); toast('대화를 파일로 저장했어요') }, '.md');
+  item('글자로 복사', async () => { await navigator.clipboard.writeText(await buildExport(c)); toast('대화를 복사했어요. 붙여넣기 하시면 돼요') });
+  if (imgs.length){
+    item(`이미지까지 묶어서 저장`, async () => {
+      toast('파일을 묶는 중이에요');
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+      const zip = new JSZip(), names = new Map(); let n = 0;
+      for (const a of imgs){
+        const v = await getAtt(a.id); if (!v) continue;
+        const ext = (v.mime || 'image/png').split('/')[1].replace('jpeg', 'jpg');
+        const fn = `${String(++n).padStart(2, '0')}_${a.generated ? 'AI이미지' : '첨부이미지'}.${ext}`;
+        names.set(a.id, fn); zip.file('images/' + fn, v.data.split(',')[1], { base64:true });
+      }
+      zip.file(base + '.md', await buildExport(c, names));
+      downloadBlob(await zip.generateAsync({ type:'blob' }), base + '.zip');
+      toast('대화와 이미지 ' + names.size + '장을 묶어서 저장했어요');
+    }, `.zip · 이미지 ${imgs.length}장`);
+  }
+  menu.hidden = false; $('expBtn').setAttribute('aria-expanded', 'true');
+  menu.querySelector('.mi')?.focus();
+}
+$('expBtn').onclick = e => { e.stopPropagation(); $('expMenu').hidden ? openExpMenu() : closeExpMenu() };
+document.addEventListener('click', e => { if (!$('expMenu').hidden && !e.target.closest('#expMenu')) closeExpMenu() });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('expMenu').hidden){ closeExpMenu(); $('expBtn').focus() } });
 
 /* ---------- 입력창 ---------- */
 function autoGrow(){ const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; updateSendBtn() }
