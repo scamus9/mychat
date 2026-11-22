@@ -64,17 +64,18 @@ aside{
 .item .del{opacity:0;border:0;background:none;color:var(--muted);padding:0 4px;font-size:16px;line-height:1}
 .item:hover .del,.item.active .del{opacity:1}
 .wallet{
-  display:block;width:calc(100% - 24px);margin:8px 12px 10px;padding:10px 12px;text-align:left;
-  border:1px solid var(--line);border-radius:10px;background:var(--surface)
+  margin:8px 12px 10px;padding:8px 12px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)
 }
-.wallet:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.w-row{display:block;width:100%;border:0;background:none;padding:4px 0;text-align:left;border-radius:6px}
+.w-row + .w-row{margin-top:6px}
+.w-row:hover .w-top span{color:var(--ink)}
 .w-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--muted)}
 .w-top b{font-size:16px;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
-.w-bar{height:4px;border-radius:2px;background:var(--line);margin-top:8px;overflow:hidden}
+.w-bar{height:4px;border-radius:2px;background:var(--line);margin-top:6px;overflow:hidden}
 .w-bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:2px;transition:width .3s}
-.w-sub{text-align:left;font-size:12px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
-.wallet.low .w-top b{color:var(--warn)} .wallet.low .w-bar i{background:var(--warn)}
-.wallet.empty .w-top b{color:var(--accent);font-size:13.5px}
+.w-sub{text-align:left;font-size:12px;color:var(--muted);margin-top:8px;font-variant-numeric:tabular-nums}
+.w-row.low .w-top b{color:var(--warn)} .w-row.low .w-bar i{background:var(--warn)}
+.w-row.unset .w-top b{color:var(--accent);font-size:13.5px}
 .msg-tools .cost{font-size:12px;color:var(--muted);margin-left:12px;font-variant-numeric:tabular-nums}
 .plabel{display:flex !important;flex-direction:column;gap:4px;font-size:12px !important;font-weight:400 !important;color:var(--muted);margin:0 !important}
 .side-foot{border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:4px;align-items:center}
@@ -284,11 +285,17 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
       <button class="btn-new" id="newBtn">새 대화</button>
     </div>
     <div id="list"></div>
-    <button class="wallet empty" id="wallet" aria-label="남은 충전금">
-      <div class="w-top"><span>남은 충전금</span><b id="wBal">입력하기</b></div>
-      <div class="w-bar"><i id="wFill"></i></div>
+    <div class="wallet" id="wallet">
+      <button class="w-row unset" data-p="openai" aria-label="OpenAI 남은 충전금">
+        <div class="w-top"><span>OpenAI 잔액</span><b>입력하기</b></div>
+        <div class="w-bar"><i></i></div>
+      </button>
+      <button class="w-row unset" data-p="claude" aria-label="Claude 남은 충전금" hidden>
+        <div class="w-top"><span>Claude 잔액</span><b>입력하기</b></div>
+        <div class="w-bar"><i></i></div>
+      </button>
       <div class="w-sub" id="wSub">이번 달 약 $0.00 사용</div>
-    </button>
+    </div>
     <div class="side-foot">
       <button class="sync" id="syncBtn"><span class="dot" id="syncDot"></span><span id="syncText">동기화 꺼짐</span></button>
       <button class="icon-btn" id="manageBtn2">지시문</button>
@@ -332,12 +339,17 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
       <div class="hint">이 기기 안에만 저장돼요. 구글 드라이브에는 올라가지 않아요.</div>
     </div>
     <div class="field">
-      <label for="sModel">모델</label>
+      <label for="sClaudeKey">Claude API 키 (선택)</label>
+      <input id="sClaudeKey" type="password" autocomplete="off" placeholder="sk-ant-...">
+      <div class="hint">platform.claude.com 에서 만든 키예요. 넣으면 Claude 모델도 고를 수 있어요.</div>
+    </div>
+    <div class="field">
+      <label for="sModel">기본 모델</label>
       <div class="row">
         <select id="sModel"></select>
         <button class="btn" id="loadModels" style="flex:0 0 auto">목록 불러오기</button>
       </div>
-      <div class="hint" id="modelHint">키를 입력한 뒤 목록 불러오기를 누르면 쓸 수 있는 모델이 나와요.</div>
+      <div class="hint" id="modelHint">키를 입력한 뒤 목록 불러오기를 누르면 OpenAI와 Claude 모델이 함께 나와요.</div>
     </div>
     <div class="field">
       <label for="sVerb">기본 답변 길이</label>
@@ -450,8 +462,8 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
 <!-- 잔액 맞추기 -->
 <dialog id="dlgB">
   <div class="dlg">
-    <h3>잔액 맞추기</h3>
-    <p class="sub">OpenAI 사이트(platform.openai.com)의 Settings → Billing에 보이는 Credit balance를 그대로 넣어 주세요. 지금부터 쓴 만큼 여기서 빼서 보여드려요.</p>
+    <h3 id="bTitle">잔액 맞추기</h3>
+    <p class="sub" id="bSub"></p>
     <div class="field">
       <label for="bAmt">지금 잔액 ($)</label>
       <input id="bAmt" inputmode="decimal" placeholder="예: 20.00">
@@ -555,16 +567,7 @@ function activeModel(){
 }
 function renderModel(){
   const sel = $('convModel'), cur = activeModel();
-  const ids = [...(settings.models || [])];
-  if (cur && !ids.includes(cur)) ids.unshift(cur);
-  sel.innerHTML = '';
-  if (!ids.length){ const o = document.createElement('option'); o.value = ''; o.textContent = '모델 선택'; sel.appendChild(o) }
-  for (const id of ids){
-    const o = document.createElement('option'); o.value = id;
-    o.textContent = id;
-    sel.appendChild(o);
-  }
-  sel.value = cur;
+  fillSelect(sel, cur, '모델 선택');
   sel.title = '이 대화의 모델: ' + (cur || '없음') + (cur && cur === settings.model ? ' (기본 모델)' : '');
 }
 $('convModel').addEventListener('change', () => {
@@ -765,8 +768,19 @@ const PRICES = {
   'gpt-4.1-mini': { in:0.4, cached:0.1, out:1.6 },
   'gpt-4.1': { in:2, cached:0.5, out:8 },
   'gpt-4o-mini': { in:0.15, cached:0.075, out:0.6 },
-  'gpt-4o': { in:2.5, cached:1.25, out:10 }
+  'gpt-4o': { in:2.5, cached:1.25, out:10 },
+  // Claude (2026년 11월 공개 요금 기준)
+  'claude-fable-5': { in:10, cached:0.25, out:50 },
+  'claude-mythos-5': { in:10, cached:0.25, out:50 },
+  'claude-opus-5-5': { in:4, cached:0.2, out:20 },
+  'claude-sonnet-5-5': { in:2, cached:0.1, out:10 },
+  'claude-haiku-5-5': { in:0.1, cached:0.01, out:0.5 },
+  'claude-opus-5': { in:5, cached:0.5, out:25 },
+  'claude-sonnet-5': { in:2, cached:0.2, out:10 }
 };
+const CLAUDE_WEB_PRICE = 0.01;
+const isClaude = m => /^claude/i.test(m || '');
+const providerOf = m => isClaude(m) ? 'claude' : 'openai';
 const IMG_PRICES = { 'gpt-image-2':30, 'gpt-image-1.5':30, 'gpt-image-1':40, 'gpt-image-1-mini':8 };
 const IMG_TOKENS = { low:{ sq:272, land:400, port:408 }, medium:{ sq:1056, land:1568, port:1584 }, high:{ sq:4160, land:6208, port:6240 } };
 const WEB_PRICE = 0.01;
@@ -828,6 +842,8 @@ async function checkPrices(force, opt = {}){
   priceChecking = true;
   force = force && !opt.quiet;
   const imgModel = imgModelName(settings.imageModel), checker = cheapModel();
+  const claudeMode = isClaude(chatModel);
+  if (!checker || isClaude(checker)){ priceChecking = false; return }
   if (force) toast('최신 가격을 확인하는 중이에요');
   const field = (extra) => ({ type:'object', additionalProperties:false, properties:{ found:{ type:'boolean' }, ...extra }, required:['found', ...Object.keys(extra)] });
   const schema = { type:'object', additionalProperties:false,
@@ -836,7 +852,10 @@ async function checkPrices(force, opt = {}){
       image: field({ image_output:{ type:'number' } }),
       web_search_per_1k_calls:{ type:'number' }
     }, required:['chat', 'image', 'web_search_per_1k_calls'] };
-  const prompt = `Look up the current official OpenAI API pricing (standard processing, short context) on openai.com or developers.openai.com only.
+  const prompt = claudeMode ? `Look up the current official Anthropic Claude API pricing (standard, prompts up to the base context tier) on claude.com, platform.claude.com, docs.claude.com or anthropic.com only.
+Return USD per 1M tokens for model "${chatModel}": base input, cache hits (cached_input), output. Set image.found=false and web_search_per_1k_calls to the Claude web search price per 1,000 searches if listed, else 0.
+If a price is not clearly listed on an official Anthropic page, set found=false and use 0. Do not guess.`
+  : `Look up the current official OpenAI API pricing (standard processing, short context) on openai.com or developers.openai.com only.
 Return USD per 1M tokens for:
 1) chat model "${chatModel}": input, cached input, output
 2) image model "${imgModel}": image output tokens
@@ -844,7 +863,7 @@ Return USD per 1M tokens for:
 If a price is not clearly listed on an official OpenAI page, set found=false and use 0. Do not guess.`;
   const body = (withFilter) => JSON.stringify({
     model: checker, store: false, input: prompt,
-    tools: [withFilter ? { type:'web_search', filters:{ allowed_domains:['openai.com', 'developers.openai.com', 'platform.openai.com'] } } : { type:'web_search' }],
+    tools: [withFilter ? { type:'web_search', filters:{ allowed_domains: claudeMode ? ['claude.com', 'platform.claude.com', 'docs.claude.com', 'anthropic.com'] : ['openai.com', 'developers.openai.com', 'platform.openai.com'] } } : { type:'web_search' }],
     text: { format: { type:'json_schema', name:'prices', schema, strict:true } }
   });
   try{
@@ -867,12 +886,12 @@ If a price is not clearly listed on an official OpenAI page, set found=false and
       autoPrices.chat[chatModel] = next;
     }
     const prevImg = defaultImgPrice(imgModel);
-    const im = r.image || {};
+    const im = claudeMode ? {} : (r.image || {});
     if (im.found && im.image_output > 0 && im.image_output <= 500 && within(im.image_output, prevImg)){
       if (changed(prevImg, im.image_output)) notes.push(imgModel);
       autoPrices.img[imgModel] = im.image_output;
     }
-    const w = r.web_search_per_1k_calls;
+    const w = claudeMode ? 0 : r.web_search_per_1k_calls;
     if (w >= 1 && w <= 100 && within(w / 1000, baseWeb())){
       if (changed(baseWeb(), w / 1000)) notes.push('웹 검색');
       autoPrices.web = w / 1000;
@@ -886,22 +905,28 @@ If a price is not clearly listed on an official OpenAI page, set found=false and
   }finally{ priceChecking = false }
 }
 
-/* ---------- 사용 기록과 잔액 ---------- */
+/* ---------- 사용 기록과 잔액 (OpenAI, Claude 따로) ---------- */
 const deviceId = LS.get('deviceId', null) || (() => { const d = uid(); LS.set('deviceId', d); return d })();
 let usageMine = LS.get('usageMine', { events:[], monthly:{}, updated:0 });
 let usageOthers = LS.get('usageOthers', {});
-let balanceBase = LS.get('balanceBase', null);
+const BASE_KEY = { openai:'balanceBase', claude:'balanceBaseClaude' };
+const BASE_FILE = { openai:'balance.json', claude:'balance-claude.json' };
+const PNAME = { openai:'OpenAI', claude:'Claude' };
+const bases = { openai: LS.get('balanceBase', null), claude: LS.get('balanceBaseClaude', null) };
 const ymOf = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') };
 const money = (x, small) => '$' + (small && x > 0 && x < 0.01 ? x.toFixed(4) : x.toFixed(2));
+const evP = e => e.p || 'openai';
 
-function recordCost(c){
+function recordCost(c, provider = 'openai'){
   if (!(c > 0)) return;
-  usageMine.events.push({ t: Date.now(), c: Math.round(c * 1e6) / 1e6 });
+  const e = { t: Date.now(), c: Math.round(c * 1e6) / 1e6 };
+  if (provider === 'claude') e.p = 'claude';
+  usageMine.events.push(e);
   if (usageMine.events.length > 1500){
-    const cut = balanceBase?.at || Date.now();
+    const cut = Math.min(bases.openai?.at || Date.now(), bases.claude?.at || Date.now());
     const keep = [];
-    for (const e of usageMine.events){
-      if (e.t < cut){ const k = ymOf(e.t); usageMine.monthly[k] = (usageMine.monthly[k] || 0) + e.c } else keep.push(e);
+    for (const x of usageMine.events){
+      if (x.t < cut){ const k = ymOf(x.t); usageMine.monthly[k] = (usageMine.monthly[k] || 0) + x.c } else keep.push(x);
     }
     usageMine.events = keep;
   }
@@ -909,41 +934,48 @@ function recordCost(c){
   renderWallet();
 }
 const allUsage = () => [usageMine, ...Object.values(usageOthers)];
-function spentSince(t){ let s = 0; for (const u of allUsage()) for (const e of (u.events || [])) if (e.t >= t) s += e.c; return s }
+function spentSince(t, p){ let s = 0; for (const u of allUsage()) for (const e of (u.events || [])) if (e.t >= t && evP(e) === p) s += e.c; return s }
 function monthSpent(){
   const cur = ymOf(Date.now()); let s = 0;
   for (const u of allUsage()){ s += u.monthly?.[cur] || 0; for (const e of (u.events || [])) if (ymOf(e.t) === cur) s += e.c }
   return s;
 }
-function currentBalance(){ return balanceBase ? balanceBase.amount - spentSince(balanceBase.at) : null }
+function currentBalance(p){ const b = bases[p]; return b ? b.amount - spentSince(b.at, p) : null }
 function renderWallet(){
-  const w = $('wallet'), bal = currentBalance();
-  $('wSub').textContent = '이번 달 약 ' + money(monthSpent()) + ' 사용';
-  if (bal === null){
-    w.className = 'wallet empty'; $('wBal').textContent = '입력하기'; $('wFill').style.width = '0';
-    return;
+  $('wSub').textContent = '이번 달 합계 약 ' + money(monthSpent()) + ' 사용';
+  for (const row of document.querySelectorAll('.w-row')){
+    const p = row.dataset.p, b = bases[p], bal = currentBalance(p);
+    if (p === 'claude') row.hidden = !settings.claudeKey && !b;
+    const label = row.querySelector('.w-top b'), fill = row.querySelector('.w-bar i');
+    if (bal === null){ row.className = 'w-row unset'; label.textContent = '입력하기'; fill.style.width = '0'; continue }
+    const pct = b.amount > 0 ? Math.max(0, Math.min(1, bal / b.amount)) : 0;
+    row.className = 'w-row' + (bal < Math.max(1, b.amount * 0.1) ? ' low' : '');
+    label.textContent = '약 ' + money(Math.max(bal, 0));
+    fill.style.width = (pct * 100).toFixed(1) + '%';
   }
-  const pct = balanceBase.amount > 0 ? Math.max(0, Math.min(1, bal / balanceBase.amount)) : 0;
-  w.className = 'wallet' + (bal < Math.max(1, balanceBase.amount * 0.1) ? ' low' : '');
-  $('wBal').textContent = '약 ' + money(Math.max(bal, 0));
-  $('wFill').style.width = (pct * 100).toFixed(1) + '%';
 }
-function openBalance(){
-  const bal = currentBalance();
+let balanceP = 'openai';
+function openBalance(p){
+  balanceP = p; const b = bases[p], bal = currentBalance(p);
+  $('bTitle').textContent = PNAME[p] + ' 잔액 맞추기';
+  $('bSub').textContent = p === 'claude'
+    ? 'Claude Console(platform.claude.com)의 Billing에 보이는 남은 크레딧을 그대로 넣어 주세요. 지금부터 쓴 만큼 여기서 빼서 보여드려요.'
+    : 'OpenAI 사이트(platform.openai.com)의 Settings → Billing에 보이는 Credit balance를 그대로 넣어 주세요. 지금부터 쓴 만큼 여기서 빼서 보여드려요.';
   $('bAmt').value = bal === null ? '' : Math.max(bal, 0).toFixed(2);
-  $('bInfo').textContent = balanceBase
-    ? `${new Date(balanceBase.at).toLocaleDateString('ko-KR')}에 ${money(balanceBase.amount)}로 맞춘 뒤 약 ${money(spentSince(balanceBase.at))} 썼어요.`
+  $('bInfo').textContent = b
+    ? `${new Date(b.at).toLocaleDateString('ko-KR')}에 ${money(b.amount)}로 맞춘 뒤 약 ${money(spentSince(b.at, p))} 썼어요.`
     : '충전할 때나 가끔 사이트 금액을 확인할 때 다시 맞춰 주시면 정확해져요.';
   $('dlgB').showModal(); $('bAmt').focus();
 }
-$('wallet').onclick = () => { $('app').classList.remove('open'); openBalance() };
+for (const row of document.querySelectorAll('.w-row')) row.onclick = () => { $('app').classList.remove('open'); openBalance(row.dataset.p) };
 $('bCancel').onclick = () => $('dlgB').close();
 $('bSave').onclick = () => {
   const v = parseFloat(String($('bAmt').value).replace(/[$,\s]/g, ''));
   if (!(v >= 0)){ toast('금액을 숫자로 넣어 주세요'); return }
-  balanceBase = { amount: v, at: Date.now(), updated: Date.now(), driveId: balanceBase?.driveId };
-  LS.set('balanceBase', balanceBase); renderWallet(); queueSync();
-  $('dlgB').close(); toast('잔액을 ' + money(v) + '로 맞췄어요');
+  const p = balanceP;
+  bases[p] = { amount: v, at: Date.now(), updated: Date.now(), driveId: bases[p]?.driveId };
+  LS.set(BASE_KEY[p], bases[p]); renderWallet(); queueSync();
+  $('dlgB').close(); toast(PNAME[p] + ' 잔액을 ' + money(v) + '로 맞췄어요');
 };
 
 /* ---------- 화면 그리기 ---------- */
@@ -973,10 +1005,10 @@ function renderMsgs(){
   $('title').textContent = c ? (c.title || '새 대화') : '새 대화';
   renderChip();
   if (!c || !c.messages.length){
-    const needKey = !settings.apiKey;
+    const needKey = !settings.apiKey && !settings.claudeKey;
     col.innerHTML = `<div class="empty">
       <p class="big">${needKey ? '먼저 API 키를 넣어 주세요' : '무엇이든 물어보세요'}</p>
-      <p>${needKey ? '설정에서 OpenAI API 키와 모델을 고르면 바로 대화할 수 있어요.' : (activeModel() ? '아래 입력창에서 모델, 답변 길이, 지시문을 고를 수 있어요.' : '설정에서 모델을 골라 주세요.')}</p>
+      <p>${needKey ? '설정에서 OpenAI나 Claude API 키를 넣고 모델을 고르면 바로 대화할 수 있어요.' : (activeModel() ? '아래 입력창에서 모델, 답변 길이, 지시문을 고를 수 있어요.' : '설정에서 모델을 골라 주세요.')}</p>
       ${needKey || !settings.model ? '<button class="btn primary" onclick="openSettings()">설정 열기</button>' : ''}
     </div>`;
     return;
@@ -1168,11 +1200,203 @@ async function readSSE(res, h){
   }
 }
 
+/* ---------- Claude (Anthropic Messages API) ---------- */
+function claudeHeaders(key){
+  return { 'content-type':'application/json', 'x-api-key': key || settings.claudeKey, 'anthropic-version':'2023-06-01',
+           'anthropic-dangerous-direct-browser-access':'true' };
+}
+const CLAUDE_IMG_TOOL = {
+  name:'generate_image',
+  description:'사용자가 그림, 사진, 일러스트, 포스터 같은 이미지 결과물을 만들어 달라거나 앞서 만든 이미지를 고쳐 달라고 할 때만 호출한다. 표, 도표, 순서도처럼 글이나 마크다운으로 답하는 게 맞으면 호출하지 않는다. 대화 맥락을 반영해 prompt를 영어로 자세하게 쓰고, 이미지 안에 들어갈 글자는 원문 그대로 따옴표 안에 넣는다.',
+  input_schema:{ type:'object', properties:{
+    prompt:{ type:'string', description:'이미지 생성용 상세 프롬프트' },
+    size:{ type:'string', enum:['1024x1024','1536x1024','1024x1536'], description:'정사각형, 가로형, 세로형' },
+    edit_last_image:{ type:'boolean', description:'대화의 가장 최근 이미지를 바탕으로 고칠 때 true' }
+  }, required:['prompt'] }
+};
+const LEN_HINT = { low:'답변은 핵심만 짧고 간결하게 써라.', high:'답변은 생략 없이 충분히 자세하고 풍부하게, 길게 써라.' };
+
+async function buildClaudeMessages(c){
+  const msgs = []; let carry = [];
+  const recent = new Set();
+  outer: for (let i = c.messages.length - 1; i >= 0; i--){
+    for (const a of [...(c.messages[i].atts || [])].reverse()) if (a.generated){ recent.add(a.id); if (recent.size >= 2) break outer }
+  }
+  const imgBlock = v => {
+    const mt = v.data.slice(5, v.data.indexOf(';'));
+    return { type:'image', source:{ type:'base64', media_type: /png|jpeg|gif|webp/.test(mt) ? mt : 'image/png', data: v.data.split(',')[1] } };
+  };
+  for (const m of c.messages){
+    if (m.role === 'assistant'){
+      let t = m.content || '';
+      for (const a of (m.atts || [])) if (a.generated){
+        t += `\n\n[이 답변에서 이미지를 만들어 보여줌${a.prompt ? ': ' + a.prompt : ''}]`;
+        const v = recent.has(a.id) ? await getAtt(a.id) : null;
+        if (v) carry.push(imgBlock(v));
+      }
+      msgs.push({ role:'assistant', content: t.trim() || '(이미지를 보여줌)' });
+      continue;
+    }
+    const prev = carry; carry = [];
+    const blocks = [...prev];
+    let text = m.content || '';
+    if (prev.length) text = (text ? text + '\n\n' : '') + '(참고: 함께 붙인 이미지는 바로 앞에서 만든 이미지야.)';
+    for (const a of (m.atts || [])){
+      const v = await getAtt(a.id);
+      if (!v){ text += `\n\n[첨부 파일 ${a.name}을 불러오지 못했어요]`; continue }
+      if (a.kind === 'image') blocks.push(imgBlock(v));
+      else if (a.kind === 'pdf') blocks.push({ type:'document', source:{ type:'base64', media_type:'application/pdf', data: v.data.split(',')[1] }, title: a.name });
+      else text += `\n\n[첨부 파일: ${a.name}]\n\`\`\`\n${v.data}\n\`\`\``;
+    }
+    blocks.push({ type:'text', text: text || '첨부한 파일을 확인해 줘.' });
+    msgs.push({ role:'user', content: blocks.length === 1 ? blocks[0].text : blocks });
+  }
+  return msgs;
+}
+
+async function generateImageOpenAI(args, c, reply){
+  if (!settings.apiKey) throw new Error('그림을 그리려면 설정에 OpenAI API 키가 필요해요');
+  let model = imgModelName(settings.imageModel);
+  const lastImg = () => {
+    for (const a of [...(reply.atts || [])].reverse()) if (a.kind === 'image') return a.id;
+    for (const m of [...c.messages].reverse()) for (const a of [...(m.atts || [])].reverse()) if (a.kind === 'image') return a.id;
+    return null;
+  };
+  const call = async (mdl) => {
+    if (args.edit_last_image){
+      const src = lastImg() && await getAtt(lastImg());
+      if (!src) throw new Error('고칠 이미지를 찾지 못했어요');
+      const blob = await (await fetch(src.data)).blob();
+      const fd = new FormData();
+      fd.append('model', mdl); fd.append('prompt', args.prompt); fd.append('size', args.size || '1024x1024');
+      fd.append('image', blob, 'image.' + ((blob.type.split('/')[1]) || 'png'));
+      return fetch('https://api.openai.com/v1/images/edits', { method:'POST', headers:{ Authorization:'Bearer ' + settings.apiKey }, body: fd, signal: abortCtl.signal });
+    }
+    return fetch('https://api.openai.com/v1/images/generations', {
+      method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + settings.apiKey },
+      body: JSON.stringify({ model: mdl, prompt: args.prompt, size: args.size || '1024x1024', n: 1 }), signal: abortCtl.signal
+    });
+  };
+  let res = await call(model), j = await res.json().catch(() => ({}));
+  if (!res.ok && /model/i.test(j.error?.message || '') && model !== 'gpt-image-1'){ model = 'gpt-image-1'; res = await call(model); j = await res.json().catch(() => ({})) }
+  if (!res.ok) throw new Error(j.error?.message || ('이미지 생성 실패 (' + res.status + ')'));
+  const b64 = j.data?.[0]?.b64_json; if (!b64) throw new Error('이미지를 받지 못했어요');
+  const outTok = j.usage?.output_tokens;
+  const cost = outTok ? outTok * imgPrice() / 1e6 : imgCost({ size: args.size, quality: 'high' });
+  const id = uid(), data = 'data:image/png;base64,' + b64;
+  const v = { kind:'image', mime:'image/png', name:`image-${id}.png`, data };
+  await idb.put(id, v).catch(() => {}); attCache.set(id, v);
+  return { meta: { id, kind:'image', mime:'image/png', name:'생성한 이미지.png', prompt: args.prompt, generated: true }, cost };
+}
+
+async function streamClaude(c, h){
+  const model = c.model || settings.model;
+  const verb = c.verbosity || settings.verbosity || 'medium';
+  const useImg = !!settings.imageGen && !!settings.apiKey;
+  let useWeb = !!settings.webSearch;
+  const sys = [ (c.system || '').trim(), LEN_HINT[verb] || '',
+    useImg ? '이 앱에서는 generate_image 도구로 실제 이미지를 만들어 보여줄 수 있으니, 이미지를 못 만든다고 말하지 마라. 다만 "그려줘"가 글로 묘사해 달라는 뜻이거나 표, 도표, 순서도처럼 글로 답하는 게 맞으면 글로 답하고, 애매하면 짧게 물어봐라. 이미지를 만든 뒤에는 짧게만 덧붙여라.' : '',
+    useWeb ? '최신 정보나 확인이 필요한 사실은 web_search로 찾아보고 답해라.' : '' ].filter(Boolean).join('\n\n');
+  const messages = await buildClaudeMessages(c);
+  let maxTokens = verb === 'high' ? 32000 : 16000;
+  for (let round = 0; round < 6; round++){
+    const tools = [];
+    if (useWeb) tools.push({ type:'web_search_20250305', name:'web_search', max_uses:5 });
+    if (useImg) tools.push(CLAUDE_IMG_TOOL);
+    const body = { model, max_tokens: maxTokens, messages, stream: true };
+    if (sys) body.system = sys;
+    if (tools.length) body.tools = tools;
+    const res = await fetch('https://api.anthropic.com/v1/messages', { method:'POST', headers: claudeHeaders(), body: JSON.stringify(body), signal: abortCtl.signal });
+    if (!res.ok){
+      const j = await res.json().catch(() => ({}));
+      const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
+      if (res.status === 400 && /max_tokens/i.test(msg) && maxTokens > 8192){ maxTokens = 8192; round--; continue }
+      if (res.status === 400 && useWeb && /web_search|tool/i.test(msg)){ useWeb = false; toast('이 Claude 모델에서는 웹 검색을 쓸 수 없어서 빼고 답해요'); round--; continue }
+      if (res.status === 401) throw new Error('Claude API 키가 맞지 않아요. 설정에서 확인해 주세요.');
+      throw new Error(msg);
+    }
+    // ---- 스트림 읽기 ----
+    const blocks = []; const usage = { in:0, cacheRead:0, cacheWrite:0, out:0, web:0 }; let stop = null;
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    let firstText = true;
+    while (true){
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines){
+        const l = line.trim(); if (!l.startsWith('data:')) continue;
+        let ev; try{ ev = JSON.parse(l.slice(5).trim()) }catch(e){ continue }
+        switch (ev.type){
+          case 'message_start': {
+            const u = ev.message?.usage || {};
+            usage.in = u.input_tokens || 0; usage.cacheRead = u.cache_read_input_tokens || 0; usage.cacheWrite = u.cache_creation_input_tokens || 0;
+            break;
+          }
+          case 'content_block_start': {
+            const b = { ...ev.content_block }; blocks[ev.index] = b;
+            if (b.type === 'text'){ b.text = b.text || ''; if (firstText){ h.msgStart(); firstText = false } }
+            if (b.type === 'tool_use' || b.type === 'server_tool_use'){ b._json = ''; if (b.name === 'web_search') h.search(true) }
+            if (b.type === 'web_search_tool_result') h.search(false);
+            break;
+          }
+          case 'content_block_delta': {
+            const b = blocks[ev.index], d = ev.delta || {};
+            if (d.type === 'text_delta'){ b.text += d.text; h.text(d.text) }
+            else if (d.type === 'input_json_delta'){ b._json += d.partial_json || '' }
+            else if (d.type === 'citations_delta' && d.citation?.url) h.annot({ type:'url_citation', url: d.citation.url, title: d.citation.title });
+            break;
+          }
+          case 'content_block_stop': {
+            const b = blocks[ev.index];
+            if (b && b._json !== undefined){ try{ b.input = b._json ? JSON.parse(b._json) : (b.input || {}) }catch(e){ b.input = {} } delete b._json }
+            break;
+          }
+          case 'message_delta':
+            if (ev.delta?.stop_reason) stop = ev.delta.stop_reason;
+            if (ev.usage){ usage.out = ev.usage.output_tokens ?? usage.out; usage.web = ev.usage.server_tool_use?.web_search_requests ?? usage.web }
+            break;
+          case 'error': throw new Error(ev.error?.message || 'Claude 오류가 났어요');
+        }
+      }
+    }
+    h.search(false);
+    // ---- 비용 ----
+    const p = priceFor(model);
+    if (p){
+      h.addCost((usage.in * p.in + usage.cacheRead * (p.cached ?? p.in) + usage.cacheWrite * p.in * 1.25 + usage.out * p.out) / 1e6 + usage.web * CLAUDE_WEB_PRICE, 'claude');
+    } else checkPrices(true, { model, quiet: true });
+    // ---- 도구 처리 ----
+    const content = blocks.filter(Boolean).map(b => { const x = { ...b }; if (x.type === 'text') delete x.citations; return x }).filter(b => !(b.type === 'text' && !b.text));
+    if (stop === 'pause_turn'){ messages.push({ role:'assistant', content }); continue }
+    if (stop !== 'tool_use') return;
+    messages.push({ role:'assistant', content });
+    const results = [];
+    for (const b of content){
+      if (b.type !== 'tool_use') continue;
+      if (b.name !== 'generate_image'){ results.push({ type:'tool_result', tool_use_id: b.id, content:'알 수 없는 도구예요.', is_error:true }); continue }
+      h.imgStart(b.id);
+      try{
+        if (!b.input?.prompt) throw new Error('그릴 내용을 알 수 없어요');
+        const { meta, cost } = await generateImageOpenAI(b.input, c, h.reply);
+        h.addCost(cost, 'openai'); h.imgReady(b.id, meta);
+        results.push({ type:'tool_result', tool_use_id: b.id, content:'이미지를 만들어서 사용자에게 이미 보여줬어요. 다시 묘사하지 말고 짧게만 덧붙이세요.' });
+      }catch(e){
+        if (e.name === 'AbortError') throw e;
+        h.imgFail(b.id);
+        results.push({ type:'tool_result', tool_use_id: b.id, content:'이미지 생성 실패: ' + e.message + ' 사용자에게 이유를 쉽게 알려 주세요.', is_error:true });
+      }
+    }
+    messages.push({ role:'user', content: results });
+  }
+}
+
 async function send(){
   if (busy){ abortCtl && abortCtl.abort(); return }
   const text = $('input').value.trim();
   if (!text && !pending.length) return;
-  if (!settings.apiKey || !settings.model){ openSettings(); toast('API 키와 모델을 먼저 설정해 주세요'); return }
+  const mNow = activeModel();
+  if (!mNow){ openSettings(); toast('모델을 먼저 골라 주세요'); return }
+  if (isClaude(mNow) ? !settings.claudeKey : !settings.apiKey){ openSettings(); toast((isClaude(mNow) ? 'Claude' : 'OpenAI') + ' API 키를 먼저 넣어 주세요'); return }
 
   const sendAtts = pending; pending = []; renderTray();
   for (const a of sendAtts){ const v = { kind:a.kind, mime:a.mime, name:a.name, data:a.data }; attCache.set(a.id, v); await idb.put(a.id, v).catch(() => {}) }
@@ -1206,12 +1430,20 @@ async function send(){
   const convModelUsed = c.model || settings.model;
   const status = t => { const st = document.createElement('div'); st.className = 'gen-status'; st.textContent = t; el.insertBefore(st, el.querySelector('.msg-tools')); scrollDown(true); return st };
   const h = {
+    reply,
     done(resp){
       const { c, known } = calcCost(resp, convModelUsed);
-      reply.model = convModelUsed;
-      reply.cost = (reply.cost || 0) + c; recordCost(c);
+      h.addCost(c, 'openai');
       if (!known) checkPrices(true, { model: convModelUsed, quiet: true });
     },
+    addCost(amount, provider){ if (amount > 0){ reply.cost = (reply.cost || 0) + amount; recordCost(amount, provider) } },
+    imgReady(id, meta){
+      const x = imgs[id]; reply.atts.push(meta);
+      const node = attEl(meta);
+      if (x) x.b.replaceWith(node); else { genBox.hidden = false; genBox.appendChild(node) }
+      scrollDown();
+    },
+    imgFail(id){ const x = imgs[id]; if (x) x.b.remove() },
     msgStart(){ if (reply.content && !reply.content.endsWith('\n\n')) onText('\n\n') },
     text: onText,
     annot(a){ if (a && a.type === 'url_citation' && a.url && !sources.has(a.url)) sources.set(a.url, a.title || a.url) },
@@ -1250,7 +1482,8 @@ async function send(){
   };
 
   try{
-    await streamResponse(c, h);
+    reply.model = convModelUsed;
+    if (isClaude(convModelUsed)) await streamClaude(c, h); else await streamResponse(c, h);
     const extra = [...sources].filter(([u]) => !reply.content.includes(u));
     if (extra.length) onText('\n\n**출처**\n' + extra.map(([u, t]) => `- [${t.replace(/[\[\]]/g, '')}](${u})`).join('\n'));
   }catch(err){
@@ -1288,40 +1521,61 @@ async function send(){
 }
 
 async function loadModels(){
-  const key = $('sKey').value.replace(/\s+/g, '');
-  $('sKey').value = key;
+  const key = $('sKey').value.replace(/\s+/g, ''), ckey = $('sClaudeKey').value.replace(/\s+/g, '');
+  $('sKey').value = key; $('sClaudeKey').value = ckey;
   const hint = $('modelHint');
-  if (!key){ hint.textContent = 'API 키를 먼저 입력해 주세요.'; toast('API 키를 먼저 입력해 주세요'); return }
+  if (!key && !ckey){ hint.textContent = 'API 키를 먼저 입력해 주세요.'; toast('API 키를 먼저 입력해 주세요'); return }
   hint.textContent = '모델 목록을 불러오는 중이에요…';
-  try{
-    const r = await fetch('https://api.openai.com/v1/models', { headers:{ Authorization:'Bearer ' + key } });
-    if (!r.ok){
+  const why = (r, j) => r.status === 401 ? 'API 키가 맞지 않아요. 키 전체가 빠짐없이 들어갔는지 확인해 주세요.'
+    : r.status === 403 ? '이 키에 모델 목록을 볼 권한이 없어요.'
+    : r.status === 429 ? '요청이 너무 많거나 충전금이 부족해요.'
+    : (j.error?.message || '');
+  const notes = [];
+  if (key){
+    try{
+      const r = await fetch('https://api.openai.com/v1/models', { headers:{ Authorization:'Bearer ' + key } });
       const j = await r.json().catch(() => ({}));
-      const why = r.status === 401 ? 'API 키가 맞지 않아요. 키 전체가 빠짐없이 들어갔는지 확인해 주세요.'
-        : r.status === 403 ? '이 키에 모델 목록을 볼 권한이 없어요. 키를 만들 때 권한을 All로 해 주세요.'
-        : r.status === 429 ? '요청이 너무 많거나 충전금이 부족해요.'
-        : (j.error?.message || '');
-      throw new Error(`(${r.status}) ${why}`);
-    }
-    const j = await r.json();
-    const skip = /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|davinci|babbage|search|computer-use/i;
-    const ids = j.data.map(m => m.id).filter(id => /^(gpt|o\d|chatgpt)/i.test(id) && !skip.test(id)).sort().reverse();
-    settings.models = ids; fillModels(ids, $('sModel').value || settings.model);
-    const imgIds = j.data.map(m => m.id).filter(id => /^(gpt-image|dall-e-3)/i.test(id)).sort().reverse();
-    settings.imageModels = imgIds; fillImageModels(imgIds, $('sImgModel').value || settings.imageModel);
-    hint.textContent = ids.length ? `${ids.length}개 모델을 불러왔어요. 위에서 하나 골라 주세요.` : '쓸 수 있는 채팅 모델이 없어요.';
-    toast(ids.length + '개 모델을 불러왔어요');
-  }catch(e){
-    const msg = e.name === 'TypeError' ? '인터넷 연결을 확인해 주세요.' : e.message;
-    hint.textContent = '불러오지 못했어요 ' + msg; toast('불러오지 못했어요 ' + msg);
+      if (!r.ok) throw new Error(`(${r.status}) ${why(r, j)}`);
+      const skip = /embedding|tts|whisper|dall-e|image|audio|realtime|transcribe|moderation|davinci|babbage|search|computer-use/i;
+      settings.models = j.data.map(m => m.id).filter(id => /^(gpt|o\d|chatgpt)/i.test(id) && !skip.test(id)).sort().reverse();
+      const imgIds = j.data.map(m => m.id).filter(id => /^(gpt-image|dall-e-3)/i.test(id)).sort().reverse();
+      settings.imageModels = imgIds; fillImageModels(imgIds, $('sImgModel').value || settings.imageModel);
+      notes.push(`OpenAI ${settings.models.length}개`);
+    }catch(e){ notes.push('OpenAI 실패 ' + (e.name === 'TypeError' ? '(인터넷 연결 확인)' : e.message)) }
   }
+  if (ckey){
+    try{
+      const r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: claudeHeaders(ckey) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`(${r.status}) ${why(r, j)}`);
+      settings.claudeModels = (j.data || []).map(m => m.id);
+      notes.push(`Claude ${settings.claudeModels.length}개`);
+    }catch(e){ notes.push('Claude 실패 ' + (e.name === 'TypeError' ? '(인터넷 연결 확인)' : e.message)) }
+  }
+  fillModels(null, $('sModel').value || settings.model);
+  hint.textContent = notes.join(' · ') + (notes.some(n => n.includes('개')) ? ' 모델을 불러왔어요. 위에서 기본 모델을 골라 주세요.' : '');
+  toast(notes.join(' · '));
 }
-function fillModels(ids, sel){
-  const s = $('sModel'); s.innerHTML = '';
-  if (!ids.length){ s.innerHTML = '<option value="">목록을 먼저 불러와 주세요</option>'; return }
-  for (const id of ids){ const o = document.createElement('option'); o.value = o.textContent = id; s.appendChild(o) }
-  if (sel && ids.includes(sel)) s.value = sel;
+function modelGroups(){
+  const g = [];
+  if ((settings.models || []).length) g.push(['OpenAI', settings.models]);
+  if ((settings.claudeModels || []).length) g.push(['Claude', settings.claudeModels]);
+  return g;
 }
+function fillSelect(sel, cur, emptyText){
+  sel.innerHTML = '';
+  const groups = modelGroups();
+  const all = groups.flatMap(([, ids]) => ids);
+  if (cur && !all.includes(cur)) groups.unshift([isClaude(cur) ? 'Claude' : 'OpenAI', [cur]]);
+  if (!groups.length){ const o = document.createElement('option'); o.value = ''; o.textContent = emptyText; sel.appendChild(o); return }
+  for (const [name, ids] of groups){
+    const og = document.createElement('optgroup'); og.label = name;
+    for (const id of ids){ const o = document.createElement('option'); o.value = o.textContent = id; og.appendChild(o) }
+    sel.appendChild(og);
+  }
+  if (cur) sel.value = cur;
+}
+function fillModels(_, sel){ fillSelect($('sModel'), sel, '목록을 먼저 불러와 주세요') }
 
 function refreshPriceFields(){
   fillPriceFields($('sModel').value || settings.model, false);
@@ -1576,7 +1830,7 @@ function disconnectGoogle(){
   LS.set('gtoken', null); LS.set('gconnected', false); LS.set('gHint', '');
   for (const c of Object.values(convs)) delete c.driveId;
   delete promptsStore.driveId; LS.set('prompts', promptsStore);
-  if (balanceBase){ delete balanceBase.driveId; LS.set('balanceBase', balanceBase) }
+  for (const p of ['openai', 'claude']) if (bases[p]){ delete bases[p].driveId; LS.set(BASE_KEY[p], bases[p]) }
   saveConvs(); setSync(); toast('연결을 해제했어요');
 }
 
@@ -1631,9 +1885,10 @@ async function uploadPrompts(){
   const data = { ...promptsStore }; delete data.driveId;
   promptsStore.driveId = await uploadFile('prompts.json', data, promptsStore.updated, promptsStore.driveId);
 }
-async function uploadBalance(){
-  const d = { amount: balanceBase.amount, at: balanceBase.at, updated: balanceBase.updated };
-  balanceBase.driveId = await uploadFile('balance.json', d, balanceBase.updated, balanceBase.driveId);
+async function uploadBalance(p){
+  const b = bases[p];
+  const d = { amount: b.amount, at: b.at, updated: b.updated };
+  b.driveId = await uploadFile(BASE_FILE[p], d, b.updated, b.driveId);
 }
 async function download(fileId){
   return (await gfetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`)).json();
@@ -1688,11 +1943,12 @@ async function sync(){
       await gfetch('https://www.googleapis.com/drive/v3/files/' + pendingDeletes[0], { method:'DELETE' });
       pendingDeletes.shift(); LS.set('pendingDeletes', pendingDeletes);
     }
-    const remote = {}; let remotePrompts = null, remoteBalance = null; const remoteUsage = {}; remoteAtts = {};
+    const remote = {}; let remotePrompts = null; const remoteBalance = {}; const remoteUsage = {}; remoteAtts = {};
     for (const f of await listRemote()){
       const upd = Number(f.appProperties?.updated || 0);
       if (f.name === 'prompts.json'){ remotePrompts = { fileId: f.id, updated: upd }; continue }
-      if (f.name === 'balance.json'){ remoteBalance = { fileId: f.id, updated: upd }; continue }
+      if (f.name === 'balance.json'){ remoteBalance.openai = { fileId: f.id, updated: upd }; continue }
+      if (f.name === 'balance-claude.json'){ remoteBalance.claude = { fileId: f.id, updated: upd }; continue }
       const um = f.name.match(/^usage-(.+)\.json$/); if (um){ remoteUsage[um[1]] = { fileId: f.id, updated: upd }; continue }
       const am = f.name.match(/^att-(.+)\.json$/); if (am){ remoteAtts[am[1]] = f.id; continue }
       const m = f.name.match(/^conv-(.+)\.json$/); if (!m) continue;
@@ -1743,16 +1999,18 @@ async function sync(){
       if (promptsStore.items.length || promptsStore.updated){ delete promptsStore.driveId; promptsStore.updated = promptsStore.updated || Date.now(); await uploadPrompts() }
     }
     LS.set('prompts', promptsStore);
-    // 잔액 기준
-    if (remoteBalance){
-      if (remoteBalance.updated > (balanceBase?.updated || 0)){
-        const d = await download(remoteBalance.fileId);
-        balanceBase = { amount: d.amount, at: d.at, updated: d.updated || remoteBalance.updated, driveId: remoteBalance.fileId };
-      } else if (balanceBase && balanceBase.updated > remoteBalance.updated){
-        balanceBase.driveId = remoteBalance.fileId; await uploadBalance();
-      } else if (balanceBase) balanceBase.driveId = remoteBalance.fileId;
-    } else if (balanceBase){ delete balanceBase.driveId; await uploadBalance() }
-    LS.set('balanceBase', balanceBase);
+    // 잔액 기준 (OpenAI, Claude 각각)
+    for (const p of ['openai', 'claude']){
+      const r = remoteBalance[p]; let b = bases[p];
+      if (r){
+        if (r.updated > (b?.updated || 0)){
+          const d = await download(r.fileId);
+          bases[p] = { amount: d.amount, at: d.at, updated: d.updated || r.updated, driveId: r.fileId };
+        } else if (b && b.updated > r.updated){ b.driveId = r.fileId; await uploadBalance(p) }
+        else if (b) b.driveId = r.fileId;
+      } else if (b){ delete b.driveId; await uploadBalance(p) }
+      LS.set(BASE_KEY[p], bases[p]);
+    }
     // 사용 기록: 내 기기 것은 올리고, 다른 기기 것은 받아오기
     const mine = remoteUsage[deviceId];
     if ((usageMine.events.length || Object.keys(usageMine.monthly).length) && (!mine || usageMine.updated > mine.updated)){
@@ -1779,7 +2037,7 @@ function queueSync(){ clearTimeout(syncTimer); syncTimer = setTimeout(sync, 1200
 
 /* ---------- 설정 ---------- */
 function openSettings(){
-  $('sKey').value = settings.apiKey; $('sClient').value = settings.clientId;
+  $('sKey').value = settings.apiKey; $('sClient').value = settings.clientId; $('sClaudeKey').value = settings.claudeKey || '';
   fillModels(settings.models || [], settings.model);
   fillImageModels(settings.imageModels || [], settings.imageModel);
   $('sImg').checked = !!settings.imageGen;
@@ -1792,6 +2050,7 @@ function saveSettings(){
   const prevModel = settings.model, prevImg = settings.imageModel;
   const clientChanged = settings.clientId !== $('sClient').value.trim();
   settings.apiKey = $('sKey').value.trim();
+  settings.claudeKey = $('sClaudeKey').value.replace(/\s+/g, '');
   settings.model = $('sModel').value || settings.model;
   settings.clientId = $('sClient').value.trim();
   settings.imageGen = $('sImg').checked;
@@ -1801,7 +2060,7 @@ function saveSettings(){
   savePriceFields();
   LS.set('settings', settings);
   if (clientChanged){ tokenClient = null; initGoogle() }
-  $('dlg').close(); renderMsgs(); renderModel(); toast('저장했어요');
+  $('dlg').close(); renderMsgs(); renderModel(); renderWallet(); toast('저장했어요');
   if (settings.model !== prevModel && !autoPrices.chat[settings.model]) checkPrices(true);
   else if (imgModelName(settings.imageModel) !== imgModelName(prevImg) && autoPrices.img[imgModelName(settings.imageModel)] === undefined) checkPrices(true);
 }
