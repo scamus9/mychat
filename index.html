@@ -309,13 +309,14 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
     <div class="top">
       <button class="icon-btn" id="menuBtn" aria-label="대화 목록 열기">☰</button>
       <h2 id="title">새 대화</h2>
-      <button class="icon-btn" id="expBtn" aria-haspopup="menu" aria-expanded="false" hidden>내보내기</button>
+      <button class="icon-btn" id="expBtn" aria-haspopup="menu" aria-expanded="false" aria-label="더보기" hidden>⋯ 더보기</button>
       <div class="menu exp-menu" id="expMenu" role="menu" hidden></div>
     </div>
     <div id="msgs"><div class="col" id="col"></div></div>
     <div class="composer">
       <div class="box">
         <div class="menu" id="instrMenu" role="menu" hidden></div>
+        <div class="menu" id="mentionMenu" role="listbox" hidden></div>
         <div class="tray" id="tray" hidden></div>
         <textarea id="input" rows="1" placeholder="메시지를 입력하세요"></textarea>
         <div class="box-foot">
@@ -993,7 +994,7 @@ function renderList(){
     b.className = 'item' + (c.id === currentId ? ' active' : '');
     b.setAttribute('role','button'); b.tabIndex = 0;
     b.innerHTML = '<span></span><button class="del" aria-label="삭제">×</button>';
-    b.querySelector('span').textContent = c.title || '새 대화';
+    b.querySelector('span').textContent = (c.noRead ? '🔒 ' : '') + (c.title || '새 대화');
     b.onclick = e => {
       if (e.target.classList.contains('del')){ e.stopPropagation(); removeConv(c.id); return }
       openConv(c.id); $('app').classList.remove('open');
@@ -1124,12 +1125,14 @@ async function buildInput(c){
         const v = recent.has(a.id) ? await getAtt(a.id) : null;
         if (v) carry.push({ type:'input_image', image_url: v.data });
       }
+      if (m.reads?.length) t += `\n\n[이 답변 전에 읽은 대화방: ${m.reads.join(', ')}]`;
       input.push({ role:'assistant', content: t.trim() || '(이미지를 보여줌)' });
       continue;
     }
     const prev = carry; carry = [];
-    if (!m.atts?.length && !prev.length){ input.push({ role:'user', content: m.content }); continue }
-    let text = m.content || '';
+    const ref = refBlock(m, m === c.messages[c.messages.length - 1]);
+    if (!m.atts?.length && !prev.length){ input.push({ role:'user', content: (m.content || '') + ref }); continue }
+    let text = (m.content || '') + ref;
     const parts = [...prev];
     if (prev.length) text = (text ? text + '\n\n' : '') + '(참고: 함께 붙인 이미지는 바로 앞에서 네가 만든 이미지야. 고쳐 달라는 요청이면 이걸 바탕으로 수정해.)';
     for (const a of (m.atts || [])){
@@ -1144,42 +1147,161 @@ async function buildInput(c){
   return input;
 }
 
+/* ---------- 다른 대화방 읽기 (요청할 때만) ---------- */
+const HINT_CHATS = '이 앱에는 사용자의 다른 대화방을 읽는 도구(list_chats, search_chats, read_chat, read_all_chats)가 있다. 사용자가 다른 대화방을 읽어 달라고 하거나, 지난 대화나 예전에 쓴 내용을 찾아 달라고 할 때만 써라. 그런 요청이 없으면 다른 대화방을 읽지 마라. 메시지에 @대화방이름 이 있으면 그 대화방 내용이 이미 함께 들어 있으니 다시 읽지 않아도 된다.';
+const CHAT_TOOLS = [
+  { name:'list_chats', description:'사용자의 다른 대화방 목록(제목, 날짜, 길이)을 본다.', params:{ type:'object', properties:{}, required:[] } },
+  { name:'search_chats', description:'다른 대화방들의 내용을 키워드로 검색해서 관련 부분을 찾는다. 대화방 이름을 모를 때 쓴다.', params:{ type:'object', properties:{ query:{ type:'string', description:'찾을 키워드' } }, required:['query'] } },
+  { name:'read_chat', description:'이름(일부만 맞아도 됨)으로 대화방 하나를 찾아 전체 내용을 읽는다.', params:{ type:'object', properties:{ name:{ type:'string', description:'대화방 이름 또는 그 일부' } }, required:['name'] } },
+  { name:'read_all_chats', description:'사용자가 다른 대화방을 모두 읽어 달라고 했을 때만 쓴다. 양이 많으면 대화방마다 앞뒤 핵심만 가져온다.', params:{ type:'object', properties:{}, required:[] } }
+];
+const norm = t => (t || '').toLowerCase().replace(/\s+/g, '');
+function otherChats(curId){ return Object.values(convs).filter(x => x.id !== curId && !x.noRead && x.messages?.length).sort((a, b) => b.updated - a.updated) }
+function chatText(x, limit = 30000){
+  const parts = [];
+  for (const m of x.messages){
+    let t = (m.role === 'user' ? '나: ' : 'AI: ') + (m.content || '');
+    for (const a of (m.atts || [])) t += a.generated ? ' [AI가 만든 이미지]' : ` [첨부: ${a.name}]`;
+    parts.push(t);
+  }
+  let all = parts.join('\n\n');
+  if (all.length > limit) all = all.slice(0, Math.floor(limit * 0.25)) + '\n\n…(중간 생략)…\n\n' + all.slice(-Math.floor(limit * 0.75));
+  return all;
+}
+const fmtDate = t => new Date(t).toLocaleDateString('ko-KR');
+function findChats(name, curId){
+  const q = norm(name), list = otherChats(curId);
+  const exact = list.filter(x => norm(x.title) === q);
+  if (exact.length) return exact;
+  return list.filter(x => norm(x.title).includes(q) || (q.length >= 2 && q.includes(norm(x.title))));
+}
+function estCost(chars, model){ const p = priceFor(model); return p ? (chars / 1.5) * p.in * 2 / 1e6 : 0 }
+
+async function runChatTool(name, args, c, h){
+  const curId = c.id, model = c.model || settings.model;
+  if (name === 'list_chats'){
+    const list = otherChats(curId);
+    if (!list.length) return '읽을 수 있는 다른 대화방이 없어요.';
+    return list.map(x => `- ${x.title || '새 대화'} (${fmtDate(x.updated)}, 메시지 ${x.messages.length}개)`).join('\n');
+  }
+  if (name === 'search_chats'){
+    const words = String(args.query || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return '검색어가 없어요.';
+    const hits = [];
+    for (const x of otherChats(curId)) for (const m of x.messages){
+      const t = m.content || '', lt = t.toLowerCase();
+      const score = words.filter(w => lt.includes(w)).length;
+      if (!score) continue;
+      const i = Math.max(0, lt.indexOf(words.find(w => lt.includes(w))) - 80);
+      hits.push({ score, x, snip: (i ? '…' : '') + t.slice(i, i + 260).replace(/\s+/g, ' ') + '…', who: m.role === 'user' ? '나' : 'AI' });
+    }
+    hits.sort((a, b) => b.score - a.score || b.x.updated - a.x.updated);
+    if (!hits.length) return '찾는 내용이 있는 대화방이 없어요.';
+    return hits.slice(0, 8).map(k => `- [${k.x.title}] ${k.who}: ${k.snip}`).join('\n') + '\n\n자세히 보려면 read_chat으로 대화방 이름을 넣어 읽으세요.';
+  }
+  if (name === 'read_chat'){
+    const found = findChats(args.name, curId);
+    if (!found.length) return `"${args.name}" 이름의 대화방을 못 찾았어요. list_chats나 search_chats로 찾아보세요.`;
+    if (found.length > 1 && norm(found[0].title) !== norm(args.name))
+      return '비슷한 대화방이 여러 개예요. 사용자에게 어떤 건지 물어보세요:\n' + found.slice(0, 8).map(x => `- ${x.title} (${fmtDate(x.updated)})`).join('\n');
+    const x = found[0];
+    h.reads.push(x.title);
+    return `[대화방: ${x.title} · ${fmtDate(x.updated)}]\n` + (x.system ? `(이 대화방의 지시문: ${x.system.slice(0, 300)})\n` : '') + '\n' + chatText(x);
+  }
+  if (name === 'read_all_chats'){
+    const list = otherChats(curId);
+    if (!list.length) return '읽을 수 있는 다른 대화방이 없어요.';
+    const total = list.reduce((n, x) => n + chatText(x, 1e9).length, 0);
+    const full = total <= 40000;
+    const text = full
+      ? list.map(x => `### ${x.title} (${fmtDate(x.updated)})\n${chatText(x, 15000)}`).join('\n\n')
+      : list.map(x => {
+          const first = x.messages.find(m => m.role === 'user')?.content || '';
+          const last = x.messages.slice(-2).map(m => (m.role === 'user' ? '나: ' : 'AI: ') + (m.content || '').slice(0, 500)).join('\n');
+          return `### ${x.title} (${fmtDate(x.updated)}, 메시지 ${x.messages.length}개)\n처음 질문: ${first.slice(0, 300)}\n마지막 내용:\n${last}`;
+        }).join('\n\n');
+    const cost = estCost(text.length, model);
+    if (text.length > 15000 && !confirm(`대화방 ${list.length}개를 읽어요. 약 ${money(Math.max(cost, 0.01))} 정도 들어요. 계속할까요?`))
+      return '사용자가 비용 때문에 취소했어요. 특정 대화방 이름을 알려 달라고 부탁하세요.';
+    h.reads.push(`대화방 ${list.length}개 전체`);
+    return (full ? '' : '(양이 많아서 대화방마다 처음 질문과 마지막 내용만 가져왔어요. 더 자세히 필요한 대화방은 read_chat으로 읽으세요.)\n\n') + text;
+  }
+  return '알 수 없는 도구예요.';
+}
+
+// @대화방이름 으로 부른 대화방 찾기
+function mentionedChats(text, curId){
+  const out = [];
+  const list = Object.values(convs).filter(x => x.id !== curId && x.messages?.length && x.title).sort((a, b) => b.title.length - a.title.length);
+  let t = text;
+  for (const x of list) if (t.includes('@' + x.title)){ out.push(x); t = t.split('@' + x.title).join('') }
+  return out;
+}
+function refBlock(m, isLast){
+  if (!m.refs?.length) return '';
+  return m.refs.map(id => {
+    const x = convs[id];
+    if (!x || x.noRead) return '';
+    return isLast ? `\n\n[참고 자료: "@${x.title}" 대화방 내용]\n${chatText(x)}` : `\n\n[이 질문에서 "@${x.title}" 대화방을 참고했음]`;
+  }).join('');
+}
+
 async function streamResponse(c, h){
   let tools = activeTools();
+  let useChatTools = true;
   let verb = (c.verbosity || settings.verbosity || 'medium');
-  for (let attempt = 0; attempt < 4; attempt++){
-    const sys = [ (c.system || '').trim(),
-      tools.some(t => t.type === 'image_generation') ? HINT_IMG : '',
-      tools.some(t => t.type === 'web_search') ? HINT_WEB : '' ].filter(Boolean).join('\n\n');
-    const body = { model: c.model || settings.model, input: await buildInput(c), stream: true, store: false };
-    if (sys) body.instructions = sys;
-    if (tools.length) body.tools = tools;
-    if (verb) body.text = { verbosity: verb };
-    const res = await fetch('https://api.openai.com/v1/responses', {
-      method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
-      body: JSON.stringify(body), signal: abortCtl.signal
-    });
-    if (!res.ok){
-      const j = await res.json().catch(() => ({}));
-      const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
-      if (res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429){
-        if (verb && /verbosity|text\.|'text'/i.test(msg)){
-          verb = null;
-          if (!toast.verbWarned){ toast.verbWarned = true; toast('이 모델은 답변 길이 설정을 지원하지 않아서 기본 길이로 답해요') }
-          continue;
+  const input = await buildInput(c);
+  for (let round = 0; round < 6; round++){
+    let calls = null;
+    for (let attempt = 0; attempt < 5; attempt++){
+      const sys = [ (c.system || '').trim(),
+        tools.some(t => t.type === 'image_generation') ? HINT_IMG : '',
+        tools.some(t => t.type === 'web_search') ? HINT_WEB : '',
+        useChatTools ? HINT_CHATS : '' ].filter(Boolean).join('\n\n');
+      const allTools = [...tools, ...(useChatTools ? CHAT_TOOLS.map(t => ({ type:'function', name:t.name, description:t.description, parameters:t.params })) : [])];
+      const body = { model: c.model || settings.model, input, stream: true, store: false };
+      if (sys) body.instructions = sys;
+      if (allTools.length) body.tools = allTools;
+      if (verb) body.text = { verbosity: verb };
+      const res = await fetch('https://api.openai.com/v1/responses', {
+        method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.apiKey },
+        body: JSON.stringify(body), signal: abortCtl.signal
+      });
+      if (!res.ok){
+        const j = await res.json().catch(() => ({}));
+        const msg = j.error?.message || ('요청 실패 (' + res.status + ')');
+        if (res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429){
+          if (verb && /verbosity|text\.|'text'/i.test(msg)){
+            verb = null;
+            if (!toast.verbWarned){ toast.verbWarned = true; toast('이 모델은 답변 길이 설정을 지원하지 않아서 기본 길이로 답해요') }
+            continue;
+          }
+          const im = tools.find(t => t.model);
+          if (im && /model/i.test(msg)){ delete im.model; toast('고른 이미지 모델을 쓸 수 없어서 자동으로 골랐어요'); continue }
+          if (useChatTools && /function/i.test(msg)){ useChatTools = false; continue }
+          if (tools.length && /tool|web_search|image_generation/i.test(msg)){
+            tools = []; toast('지금 채팅 모델은 웹 검색이나 이미지 생성을 지원하지 않아요. 설정에서 gpt-5 계열로 바꿔 주세요'); continue;
+          }
         }
-        const im = tools.find(t => t.model);
-        if (im && /model/i.test(msg)){ delete im.model; toast('고른 이미지 모델을 쓸 수 없어서 자동으로 골랐어요'); continue }
-        if (tools.length && /tool|web_search|image_generation/i.test(msg)){
-          tools = []; toast('지금 채팅 모델은 웹 검색이나 이미지 생성을 지원하지 않아요. 설정에서 gpt-5 계열로 바꿔 주세요'); continue;
-        }
+        throw new Error(msg);
       }
-      throw new Error(msg);
+      calls = []; h.fcalls = calls; h.roundText = '';
+      await readSSE(res, h);
+      break;
     }
-    await readSSE(res, h);
-    return;
+    if (calls === null) throw new Error('요청을 보내지 못했어요');
+    if (!calls.length) return;
+    // 도구 실행 후 이어서 요청
+    if (h.roundText.trim()) input.push({ role:'assistant', content: h.roundText });
+    for (const fc of calls){
+      let args = {}; try{ args = JSON.parse(fc.arguments || '{}') }catch(e){}
+      const st = h.status(fc.name === 'search_chats' ? '다른 대화방에서 찾아보는 중이에요' : '다른 대화방을 읽는 중이에요');
+      let out;
+      try{ out = await runChatTool(fc.name, args, c, h) }finally{ st.remove() }
+      input.push({ type:'function_call', call_id: fc.call_id, name: fc.name, arguments: fc.arguments || '{}' });
+      input.push({ type:'function_call_output', call_id: fc.call_id, output: out });
+    }
   }
-  throw new Error('요청을 보내지 못했어요');
 }
 
 async function readSSE(res, h){
@@ -1197,12 +1319,13 @@ async function readSSE(res, h){
           else if (ev.item?.type === 'image_generation_call') h.imgStart(ev.item.id);
           else if (ev.item?.type === 'web_search_call') h.search(true);
           break;
-        case 'response.output_text.delta': h.text(ev.delta || ''); break;
+        case 'response.output_text.delta': h.text(ev.delta || ''); if (h.roundText !== undefined) h.roundText += (ev.delta || ''); break;
         case 'response.output_text.annotation.added': h.annot(ev.annotation); break;
         case 'response.image_generation_call.partial_image': h.imgPartial(ev.item_id, ev.partial_image_b64); break;
         case 'response.output_item.done':
           if (ev.item?.type === 'image_generation_call') h.imgDone(ev.item);
           else if (ev.item?.type === 'web_search_call') h.search(false);
+          else if (ev.item?.type === 'function_call' && h.fcalls) h.fcalls.push(ev.item);
           else if (ev.item?.type === 'message') for (const p of (ev.item.content || [])) for (const a of (p.annotations || [])) h.annot(a);
           break;
         case 'response.completed': h.done && h.done(ev.response || {}); break;
@@ -1248,12 +1371,13 @@ async function buildClaudeMessages(c){
         const v = recent.has(a.id) ? await getAtt(a.id) : null;
         if (v) carry.push(imgBlock(v));
       }
+      if (m.reads?.length) t += `\n\n[이 답변 전에 읽은 대화방: ${m.reads.join(', ')}]`;
       msgs.push({ role:'assistant', content: t.trim() || '(이미지를 보여줌)' });
       continue;
     }
     const prev = carry; carry = [];
     const blocks = [...prev];
-    let text = m.content || '';
+    let text = (m.content || '') + refBlock(m, m === c.messages[c.messages.length - 1]);
     if (prev.length) text = (text ? text + '\n\n' : '') + '(참고: 함께 붙인 이미지는 바로 앞에서 만든 이미지야.)';
     for (const a of (m.atts || [])){
       const v = await getAtt(a.id);
@@ -1310,13 +1434,14 @@ async function streamClaude(c, h){
   let useWeb = !!settings.webSearch;
   const sys = [ (c.system || '').trim(), LEN_HINT[verb] || '',
     useImg ? '이 앱에서는 generate_image 도구로 실제 이미지를 만들어 보여줄 수 있으니, 이미지를 못 만든다고 말하지 마라. 다만 "그려줘"가 글로 묘사해 달라는 뜻이거나 표, 도표, 순서도처럼 글로 답하는 게 맞으면 글로 답하고, 애매하면 짧게 물어봐라. 이미지를 만든 뒤에는 짧게만 덧붙여라.' : '',
-    useWeb ? '최신 정보나 확인이 필요한 사실은 web_search로 찾아보고 답해라.' : '' ].filter(Boolean).join('\n\n');
+    useWeb ? '최신 정보나 확인이 필요한 사실은 web_search로 찾아보고 답해라.' : '', HINT_CHATS ].filter(Boolean).join('\n\n');
   const messages = await buildClaudeMessages(c);
   let maxTokens = verb === 'high' ? 32000 : 16000;
   for (let round = 0; round < 6; round++){
     const tools = [];
     if (useWeb) tools.push({ type:'web_search_20250305', name:'web_search', max_uses:5 });
     if (useImg) tools.push(CLAUDE_IMG_TOOL);
+    for (const t of CHAT_TOOLS) tools.push({ name:t.name, description:t.description, input_schema:t.params });
     const body = { model, max_tokens: maxTokens, messages, stream: true };
     if (sys) body.system = sys;
     if (tools.length) body.tools = tools;
@@ -1387,6 +1512,11 @@ async function streamClaude(c, h){
     const results = [];
     for (const b of content){
       if (b.type !== 'tool_use') continue;
+      if (CHAT_TOOLS.some(t => t.name === b.name)){
+        const st = h.status(b.name === 'search_chats' ? '다른 대화방에서 찾아보는 중이에요' : '다른 대화방을 읽는 중이에요');
+        try{ results.push({ type:'tool_result', tool_use_id: b.id, content: await runChatTool(b.name, b.input || {}, c, h) }) }finally{ st.remove() }
+        continue;
+      }
       if (b.name !== 'generate_image'){ results.push({ type:'tool_result', tool_use_id: b.id, content:'알 수 없는 도구예요.', is_error:true }); continue }
       h.imgStart(b.id);
       try{
@@ -1425,6 +1555,10 @@ async function send(){
     convs[c.id] = c; currentId = c.id; LS.set('currentId', c.id);
   }
   const userMsg = { role:'user', content:text };
+  const refs = mentionedChats(text, c.id);
+  const locked = refs.filter(x => x.noRead);
+  if (locked.length) toast(`"${locked[0].title}" 대화방은 읽기 금지로 잠겨 있어서 빼고 보낼게요`);
+  if (refs.some(x => !x.noRead)) userMsg.refs = refs.filter(x => !x.noRead).map(x => x.id);
   if (metas.length) userMsg.atts = metas;
   c.messages.push(userMsg);
   c.updated = Date.now(); saveConvs();
@@ -1445,6 +1579,8 @@ async function send(){
   const status = t => { const st = document.createElement('div'); st.className = 'gen-status'; st.textContent = t; el.insertBefore(st, el.querySelector('.msg-tools')); scrollDown(true); return st };
   const h = {
     reply,
+    reads: [],
+    status,
     done(resp){
       const { c, known } = calcCost(resp, convModelUsed);
       h.addCost(c, 'openai');
@@ -1524,6 +1660,7 @@ async function send(){
       reply.content = reply.content.trim();
       body.innerHTML = reply.content ? md(reply.content) : '';
       if (!reply.atts.length) delete reply.atts;
+      if (h.reads.length) reply.reads = [...new Set(h.reads)];
       if (!(reply.cost > 0)) delete reply.cost;
       if (!reply.model) reply.model = convModelUsed;
       const mt = metaText(reply);
@@ -2126,7 +2263,7 @@ function openExpMenu(){
   const c = convs[currentId]; if (!c) return;
   const menu = $('expMenu'), imgs = convImages(c);
   const base = `${safeName(c.title)}_${dateStr()}`;
-  menu.innerHTML = '<div class="mh">이 대화 내보내기</div>';
+  menu.innerHTML = '<div class="mh">이 대화방</div>';
   const item = (label, fn, sub) => {
     const b = document.createElement('button'); b.className = 'mi'; b.setAttribute('role', 'menuitem');
     b.innerHTML = '<span class="nm"></span>' + (sub ? '<small></small>' : '');
@@ -2134,6 +2271,12 @@ function openExpMenu(){
     b.onclick = async () => { closeExpMenu(); try{ await fn() }catch(e){ if (e.name !== 'AbortError') toast('내보내지 못했어요: ' + e.message) } };
     menu.appendChild(b);
   };
+  item(c.noRead ? '🔒 다른 대화방에서 읽기 허용하기' : '다른 대화방에서 읽기 금지', async () => {
+    c.noRead = !c.noRead; c.updated = Date.now(); saveConvs(); queueSync(); renderList(); renderMsgs(true);
+    toast(c.noRead ? '이제 다른 대화방에서 이 대화를 읽을 수 없어요' : '다른 대화방에서 이 대화를 읽을 수 있어요');
+  }, c.noRead ? '잠김' : '');
+  menu.appendChild(document.createElement('hr'));
+  const hdr = document.createElement('div'); hdr.className = 'mh'; hdr.textContent = '내보내기'; menu.appendChild(hdr);
   const mdFile = async () => new File([await buildExport(c)], base + '.md', { type:'text/markdown' });
   if (navigator.canShare && navigator.canShare({ files:[new File(['x'], 'x.md', { type:'text/markdown' })] })){
     item('다른 앱으로 보내기', async () => { await navigator.share({ files:[await mdFile()], title: c.title || '대화' }) }, 'Claude, ChatGPT 앱');
@@ -2162,6 +2305,53 @@ function openExpMenu(){
 $('expBtn').onclick = e => { e.stopPropagation(); $('expMenu').hidden ? openExpMenu() : closeExpMenu() };
 document.addEventListener('click', e => { if (!$('expMenu').hidden && !e.target.closest('#expMenu')) closeExpMenu() });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('expMenu').hidden){ closeExpMenu(); $('expBtn').focus() } });
+
+/* ---------- @대화방 부르기 ---------- */
+let mentionSel = 0;
+function mentionQuery(){
+  const t = $('input'), before = t.value.slice(0, t.selectionStart);
+  const m = before.match(/(^|\s)@([^@\n]{0,30})$/);
+  return m ? { q: m[2], start: before.length - m[2].length - 1 } : null;
+}
+function closeMention(){ $('mentionMenu').hidden = true }
+function renderMention(){
+  const mq = mentionQuery(); const menu = $('mentionMenu');
+  if (!mq){ closeMention(); return }
+  const q = norm(mq.q);
+  const list = Object.values(convs).filter(x => x.id !== currentId && x.messages?.length && x.title && norm(x.title).includes(q))
+    .sort((a, b) => b.updated - a.updated).slice(0, 8);
+  if (!list.length){ closeMention(); return }
+  mentionSel = Math.min(mentionSel, list.length - 1);
+  menu.innerHTML = '<div class="mh">어떤 대화방을 참고할까요?</div>';
+  list.forEach((x, i) => {
+    const b = document.createElement('button'); b.className = 'mi'; b.setAttribute('role', 'option');
+    if (i === mentionSel) b.style.background = 'color-mix(in srgb,var(--ink) 8%,transparent)';
+    b.innerHTML = '<span class="nm"></span><small></small>';
+    b.querySelector('.nm').textContent = (x.noRead ? '🔒 ' : '') + x.title;
+    b.querySelector('small').textContent = fmtDate(x.updated);
+    b.onmousedown = e => e.preventDefault();
+    b.onclick = () => pickMention(x);
+    menu.appendChild(b);
+  });
+  menu._list = list; menu.hidden = false;
+}
+function pickMention(x){
+  const t = $('input'), mq = mentionQuery(); if (!mq) return;
+  const ins = '@' + x.title + ' ';
+  t.value = t.value.slice(0, mq.start) + ins + t.value.slice(t.selectionStart);
+  const pos = mq.start + ins.length; t.setSelectionRange(pos, pos); t.focus();
+  closeMention(); autoGrow();
+  if (x.noRead) toast('이 대화방은 읽기 금지로 잠겨 있어요');
+}
+$('input').addEventListener('input', () => { mentionSel = 0; renderMention() });
+$('input').addEventListener('click', renderMention);
+$('input').addEventListener('keydown', e => {
+  const menu = $('mentionMenu'); if (menu.hidden) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); mentionSel = (mentionSel + (e.key === 'ArrowDown' ? 1 : -1) + menu._list.length) % menu._list.length; renderMention() }
+  else if (e.key === 'Enter' || e.key === 'Tab'){ e.preventDefault(); e.stopImmediatePropagation(); pickMention(menu._list[mentionSel]) }
+  else if (e.key === 'Escape'){ e.preventDefault(); closeMention() }
+}, true);
+$('input').addEventListener('blur', () => setTimeout(closeMention, 150));
 
 /* ---------- 입력창 ---------- */
 function autoGrow(){ const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; updateSendBtn() }
